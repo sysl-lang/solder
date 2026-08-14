@@ -1,0 +1,31 @@
+module sh.sysl.solder
+
+// What goes wrong, and the one distinction a console cares about.
+//
+// **`More` is not an error.** It is the answer when the text stops in the middle of something that
+// could still be finished -- a definition opened with `DEF` and not yet closed with `END`, a string
+// literal with no closing quote. A file being read has run out and that is a mistake; a person typing
+// has simply not finished, and the caller is the only one that knows which it is. Keeping the two
+// apart here is what lets a console print a continuation prompt instead of a complaint.
+//
+// **The C original had neither.** `src/error.c` sets a message and `longjmp`s out of wherever the
+// failure happened, which unwinds no state and leaves the caller to guess whether the input was wrong
+// or merely short. A `Result` carrying this is the same information without the jump, and it is what
+// lets a word that fails halfway leave the stacks in a state the next line can use.
+enum Fault
+    Bad(message: string)
+    More
+end Fault
+
+// A fault as the sentence a person reads. `More` renders as a complaint because a caller that has run
+// out of text and cannot ask for more is entitled to one -- a console never gets here, because it
+// takes the other branch and asks for the rest.
+describe(f: Fault) -> string
+    f match
+        Bad(message) -> message
+        More -> "the input stops in the middle of something"
+end describe
+
+// A refusal, as the `Err` side of whatever the caller is returning. Written once so that the twenty or
+// so places that refuse read as one sentence each rather than as two constructor calls.
+bad[T](message: string) -> Result[T, Fault] = Err(Bad(message))

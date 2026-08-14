@@ -1,0 +1,36 @@
+// SOLDER -- Stack Oriented Language for Deep Embedded Runtimes.
+//
+// A Forth in the broad sense: no syntax, postfix over a data stack, a dictionary of words that can be
+// extended from the keyboard. What it adds to Forth is a *typed* cell -- integers of two widths, a
+// double, a string, an array, an object, a colour, a moment, a coordinate -- and reference counting,
+// so an array that goes out of use is freed at the point it stops being referred to rather than at a
+// collection nobody scheduled.
+//
+// This package is the language itself and nothing else: it reads text and answers with text, and
+// knows nothing about a board, a register or a terminal. What drives it is a separate program.
+//
+// This is the block a *consumer* writes to reach it:
+//
+//     dependencies {
+//       solder { git = "github.com/sysl-lang/solder", version = "0.1.0" }
+//     }
+//
+// The coordinate names the package, `solder`; the module a program imports is `sh.sysl.solder`.
+
+package {
+  name    = "solder"
+  version = "0.1.0"
+}
+
+// **`heap = true`, and it is a decision rather than an oversight.** The dictionary grows as words are
+// defined, an array holds as many cells as it was asked to, and a string is as long as the person at
+// the keyboard typed -- all three are sizes chosen at run time by somebody who is not the programmer.
+// The board this is aimed at links a heap whether or not a program touches it, so the capability costs
+// nothing that is not already spent.
+//
+// **What it buys that a fixed arena would not is the refcounting itself.** A cell holding an array is
+// a counted reference, and the whole argument for this port is that the language does the retaining
+// and releasing that `src/cell.c` does by hand in the C original.
+requires {
+  heap = true
+}

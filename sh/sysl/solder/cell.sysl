@@ -1,0 +1,266 @@
+module sh.sysl.solder
+
+import sysl.buf.Buf
+
+// The one datum. Everything on the data stack, in an array, under a key in an object or inside a
+// compiled definition is a `Cell`.
+//
+// **It is a data enum, and that is the whole argument for this port.** The C original spells the same
+// idea as a `uint8_t type` beside a `union payload`, and every read of that union is a promise the
+// compiler cannot check -- `cell.payload.array` on a cell whose `type` says `CELL_FLOAT` compiles
+// silently and reads a double as a pointer. Here the payload is reachable only through a `match` on
+// the tag that names it, so the promise is the pattern.
+//
+// **The counting is the language's.** `src/cell.c` is 236 lines of hand-written `retain` and `release`
+// with a `switch` over the types that own storage, called by hand at every assignment, every stack
+// push and every array teardown -- and getting one of those calls wrong is a leak or a use-after-free
+// that nothing reports. None of it is here: `&Buf[Cell]` and `string` are counted, so an array that
+// stops being referred to is freed at the point it stops, including the case C most often gets wrong,
+// which is assigning a new cell over a live one.
+//
+// ## The layout, and why the side-channel is folded into the variants
+//
+// C carries `type`, `flags` and `word_idx` in one 4-byte word ahead of the union, so the three cost
+// nothing beyond the alignment the payload already forces. A sysl enum's tag is its own, so a struct
+// wrapping `flags`, `word_idx` and a `Cell` pays for them separately and the cell grows by a word.
+//
+// **So each of those fields lives in the variant that actually uses it, and nowhere else.** An `Int`
+// has no dictionary index and a `Real` is never immediate. Two of the three then disappear outright:
+//
+// - **`word_idx`** was how a compiled cell found its way back to the dictionary entry it came from,
+//   for decompilation and for the pointer that `VARIABLE` hands out. `Var` carries the slot it needs
+//   and nothing else does.
+// - **`CELL_FLAG_IMMEDIATE`** is a property of the *dictionary entry*, not of the value: it decides
+//   what the reader does when it meets the name, and a token already pushed on the stack is past that
+//   question. It sits on `Word` in `vm.sysl`.
+// - **`CELL_FLAG_INTERNED`** distinguished a string the interpreter owns from one it borrows from an
+//   intern pool, so that `release` knew whether to free it. A counted `string` answers that by
+//   construction and the flag has nothing left to say.
+//
+// ## What decides the size, and why there is no inline string
+//
+// **A `string` is 24 bytes here and 12 on a 32-bit target** -- measured at 0.0.51, not assumed -- so
+// `Text` is the widest variant by some distance and the cell is 32 bytes on the host and 24 on
+// thumbv8m, against the C original's packed 12. Size is out of scope for this port and that is the
+// user's decision; what is *in* scope is not paying for a field twice, which is what the fold above is
+// about.
+//
+// **Card 0119 carried an `Inline([7]u8, len: u8)` variant for short strings, and it is not here.** Its
+// seven bytes were sized against a cell that had no `string` variant in it at all -- the probe used a
+// counted reference -- so the premise that nine payload bytes would double the cell does not survive
+// a `Text`. With a 24-byte payload already in the enum an inline string saves nothing in space, and
+// what it would cost is a second representation that every string operation has to handle: either the
+// reader materialises a `string` from the bytes, which allocates and so gives back the one thing
+// inlining was for, or every length, comparison and slice is written twice.
+//
+// The reason it is not needed is the reason the port is worth making: sysl's `string` is already
+// immutable, counted and shared, which is what C's `allocated_string_t`, its intern pool and its
+// inline-cell trick existed between them to provide.
+enum Cell
+    // Nothing, deliberately: what a slot holds before anything is put in it.
+    Nul
+    // The absence of an answer, which is different from the answer `Nul`. Reading a key an object does
+    // not have gives this; reading a key whose value *is* nothing gives `Nul`.
+    Undef
+    Bool(b: bool)
+    Int(v: int)
+    Long(v: long)
+    Real(v: f64)
+    Text(s: string)
+    Arr(items: &Buf[Cell])
+    Obj(entries: &Buf[Entry])
+    // A compiled definition: the cells the inner interpreter walks.
+    //
+    // **The same shape as `Arr` and a different tag**, exactly as in C, because first-class code is
+    // the point -- `'` puts a definition on the stack and `EXECUTE` runs what it finds there.
+    Code(body: &Buf[Cell])
+    // A word written in sysl rather than in SOLDER.
+    Native(f: *extern(&Vm) -> Result[unit, Fault])
+    // A variable's storage, named by its slot in the interpreter's table. `@` reads it and `!` writes
+    // it. This is C's `CELL_POINTER` with the pointer taken out.
+    Var(slot: usize)
+    // The two cells the compiler plants for control flow, holding a signed distance from the cell
+    // after them. They never reach the data stack.
+    Branch(delta: int)
+    BranchIfFalse(delta: int)
+    Rgb(r: u8, g: u8, b: u8)
+    // A moment: seconds since the Unix epoch, and minutes from UTC. Unsigned seconds run to 2106,
+    // which is the C original's choice and is longer than the boards will last.
+    Stamp(seconds: u32, tz_minutes: i16)
+    Coord(lon: f32, lat: f32)
+    Complex(re: f32, im: f32)
+    // Two 32-bit integers in one cell, which is what `/MOD` and `*/MOD` answer with.
+    Pair(first: int, second: int)
+end Cell
+
+// **The fold, pinned.** The `string` is the widest payload and everything else fits inside it for
+// free; a variant that grew past it -- a flag beside a pointer, a wrapper struct around the enum --
+// would cost another eight bytes on every cell in every stack, array and definition at once. The
+// bound is written as a ceiling rather than an equality because the payload is a `string` and a
+// `string` is pointer-width: it is 32 here and 24 on a 32-bit target, and an equality would have to
+// name one of them.
+@assert(sizeof(Cell) <= 32,
+        "a Cell fits inside its string: fold a new field into the variants that need it")
+
+// One key and one value inside an object. A separate name rather than two parallel `Buf`s, so that
+// there is no way to have more keys than values.
+struct Entry
+    key: string
+    value: Cell
+end Entry
+
+// The name of a cell's kind, for a diagnostic that has to say what it got. Written as the noun a
+// sentence wants -- "an array", not "Arr" -- because every use of it is inside prose.
+kind(c: Cell) -> string
+    c match
+        Nul -> "null"
+        Undef -> "undefined"
+        Bool(_) -> "a boolean"
+        Int(_) -> "an integer"
+        Long(_) -> "a long"
+        Real(_) -> "a float"
+        Text(_) -> "a string"
+        Arr(_) -> "an array"
+        Obj(_) -> "an object"
+        Code(_) -> "a definition"
+        Native(_) -> "a native word"
+        Var(_) -> "a variable"
+        Branch(_) -> "a branch"
+        BranchIfFalse(_) -> "a branch"
+        Rgb(_, _, _) -> "a colour"
+        Stamp(_, _) -> "a moment"
+        Coord(_, _) -> "a coordinate"
+        Complex(_, _) -> "a complex number"
+        Pair(_, _) -> "a pair"
+end kind
+
+// Whether a cell is a string.
+is_text(c: Cell) -> bool
+    c match
+        Text(_) -> true
+        _ -> false
+end is_text
+
+// The characters of a string cell, and `""` for anything else -- which is what `is_text` is for: a
+// caller that has not asked is not owed a distinction between the empty string and a number.
+text(c: Cell) -> string
+    c match
+        Text(s) -> s
+        _ -> ""
+end text
+
+// Whether a cell counts as true where a condition is wanted -- `IF`, `UNTIL`, `WHILE`.
+//
+// **Zero, empty and absent are false and everything else is true**, which is the C original's rule.
+// A NaN is false as well, and that is the one that has to be written rather than falling out: `x != 0`
+// is true of a NaN, so testing it that way would make an arithmetic mistake look like a condition
+// somebody meant.
+truthy(c: Cell) -> bool
+    c match
+        Bool(b) -> b
+        Nul -> false
+        Undef -> false
+        Int(v) -> v != 0
+        Long(v) -> v != 0
+        Real(v) -> v != 0.0 && v == v
+        Text(s) -> s.bytes.len != 0
+        _ -> true
+end truthy
+
+// Whether two cells are the same value.
+//
+// **Numbers compare across their widths and nothing else does.** `1` and `1L` are the same number
+// written twice and answering otherwise would make `2 2 * 4 =` depend on which width the multiply
+// happened to produce; a string and a number are different kinds and comparing them is a question
+// with a plain answer rather than a mistake.
+//
+// An array or an object compares element by element, so `[] 1 , [] 1 , =` is true. Comparing them by
+// identity would make two arrays built the same way unequal, which is a question nobody asks twice.
+same(a: Cell, b: Cell) -> bool
+    a match
+        Nul -> b match
+            Nul -> true
+            _ -> false
+        Undef -> b match
+            Undef -> true
+            _ -> false
+        Bool(x) -> b match
+            Bool(y) -> x == y
+            _ -> false
+        Int(x) -> numeric_same(f64(x), b)
+        Long(x) -> numeric_same(f64(x), b)
+        Real(x) -> numeric_same(x, b)
+        Text(x) -> b match
+            Text(y) -> x == y
+            _ -> false
+        Arr(xs) -> b match
+            Arr(ys) -> items_same(xs, ys)
+            _ -> false
+        Obj(xs) -> b match
+            Obj(ys) -> entries_same(xs, ys)
+            _ -> false
+        Rgb(r, g, bl) -> b match
+            Rgb(r2, g2, b2) -> r == r2 && g == g2 && bl == b2
+            _ -> false
+        Stamp(s, tz) -> b match
+            Stamp(s2, tz2) -> s == s2 && tz == tz2
+            _ -> false
+        Coord(lon, lat) -> b match
+            Coord(lon2, lat2) -> lon == lon2 && lat == lat2
+            _ -> false
+        Complex(re, im) -> b match
+            Complex(re2, im2) -> re == re2 && im == im2
+            _ -> false
+        Pair(f, s) -> b match
+            Pair(f2, s2) -> f == f2 && s == s2
+            _ -> false
+        _ -> false
+end same
+
+// One number against whatever the other side turned out to be.
+//
+// **Both sides go through `f64`, and that costs exactly one thing**: two `long`s further apart than
+// 2^53 that differ only in their low bits compare equal. The C original has the same hole in
+// `compare_cells` and reaches it the same way; closing it means a three-way split on which side is
+// which width, and it is not worth the reading for a language whose integers come off a keyboard.
+private numeric_same(x: f64, b: Cell) -> bool
+    b match
+        Int(y) -> x == f64(y)
+        Long(y) -> x == f64(y)
+        Real(y) -> x == y
+        _ -> false
+end numeric_same
+
+private items_same(xs: &Buf[Cell], ys: &Buf[Cell]) -> bool
+    if xs.len() != ys.len() then return false
+
+    for i in 0..<xs.len()
+        if !same(xs.at(i), ys.at(i)) then return false
+
+    true
+end items_same
+
+// Two objects, key by key.
+//
+// **Order does not matter, which is what makes this a lookup rather than a walk.** An object built by
+// putting `a` then `b` and one built the other way about are the same object to anybody reading it,
+// so comparing them positionally would answer a question about insertion history.
+private entries_same(xs: &Buf[Entry], ys: &Buf[Entry]) -> bool
+    if xs.len() != ys.len() then return false
+
+    for i in 0..<xs.len()
+        val e = xs.at(i)
+        var found = false
+
+        for j in 0..<ys.len()
+            val f = ys.at(j)
+
+            if f.key == e.key
+                if !same(e.value, f.value) then return false
+
+                found = true
+
+        if !found then return false
+
+    true
+end entries_same

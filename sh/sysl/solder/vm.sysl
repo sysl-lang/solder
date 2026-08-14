@@ -1,0 +1,132 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+
+// Where the interpreter has got to inside one definition.
+//
+// **The return stack holds these rather than cells, and that is a departure from the C.** The original
+// has one stack type, so a return address is a `cell_t` whose payload is a raw `cell_t*` into the
+// middle of a code array -- which is the second of the two pointers that can be made to outlive what
+// they point at. A frame names the definition it is inside, so the body stays referred to for exactly
+// as long as something is executing it.
+struct Frame
+    body: &Buf[Cell]
+    ip: usize
+end Frame
+
+// One entry in the dictionary.
+//
+// **`immediate` is here rather than on the cell**, which is the fold the cell's own comment describes:
+// immediacy decides what the reader does when it meets a *name*, and a value already on the stack is
+// past that question.
+struct Word
+    name: string
+    def: Cell
+    immediate: bool
+    // The stack effect and a sentence, as `WORDS` and `HELP` print them.
+    help: string
+end Word
+
+// The interpreter, and the whole of its state.
+//
+// **A `Vm` is a value and carries the session**: words defined by one call to `run` are there for the
+// next, and so is whatever is left on the stack. That is what an interactive language is, and it is
+// why nothing here is global -- the C original keeps the dictionary, the compilation state and the
+// current base in file-scope variables, so two interpreters cannot exist at once and a test has to
+// save and restore the dictionary size around itself.
+struct Vm
+    // The data stack. Grown rather than fixed at 256 cells: the board this is aimed at has half a
+    // megabyte and a stack that overflows silently is worse than one that asks the allocator.
+    data: Buf[Cell]
+    // The return stack -- one frame per definition currently executing.
+    frames: Buf[Frame]
+    words: Buf[Word]
+    // Storage for `VARIABLE`. A `Var` cell holds an index into this, never an address.
+    vars: Buf[Cell]
+    // What the program has printed, in the order it printed it.
+    //
+    // **Output is accumulated rather than written**, because this package knows nothing about a
+    // terminal: a console asks for the transcript and decides where it goes, and a test reads the same
+    // string a person would have seen.
+    out: Buf[u8]
+    // Whether the reader is compiling into `building` rather than executing.
+    compiling: bool
+    building: &Buf[Cell]
+    // The name the definition under construction will be filed under.
+    building_name: string
+    // The radix `BASE` currently holds, for reading and printing integers.
+    base: int
+end Vm
+
+// A fresh interpreter with an empty dictionary.
+//
+// **The core words are not here**, so that this file has no dependency on the vocabulary and the
+// vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
+// consumer calls.
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), false, buf(), "", 10)
+
+// Everything the program has printed since the interpreter was made.
+transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())
+
+// Print, in the sense `PR` means: bytes onto the transcript, no newline of their own.
+emit(vm: &Vm, s: string) = vm.out.extend(s.bytes)
+
+// Push a cell onto the data stack.
+push(vm: &Vm, c: Cell) = vm.data.push(c)
+
+// Pop the top of the data stack, or refuse.
+//
+// **Underflow is a `Fault` rather than a panic**, because the person who caused it is at a keyboard:
+// typing `+` on an empty stack is an ordinary mistake and the next line should still work.
+pop(vm: &Vm, word: string) -> Result[Cell, Fault]
+    vm.data.pop() match
+        Some(c) -> Ok(c)
+        None -> bad("'" + word + "' wants a value and the stack is empty")
+end pop
+
+// The top of the data stack without removing it.
+peek(vm: &Vm, word: string) -> Result[Cell, Fault]
+    if vm.data.is_empty() then return bad("'" + word + "' wants a value and the stack is empty")
+
+    Ok(vm.data.at(vm.data.len() - 1))
+end peek
+
+// The two top cells, deeper one first, which is the order every binary word wants them in.
+pop2(vm: &Vm, word: string) -> Result[(Cell, Cell), Fault]
+    val b = pop(vm, word)?
+    val a = pop(vm, word)?
+
+    Ok((a, b))
+end pop2
+
+// How deep the data stack is. `.S` prints it and the tests read it.
+depth(vm: &Vm) -> usize = vm.data.len()
+
+// The entry a name is filed under, if any.
+//
+// **The search runs backwards, so a later definition of a name shadows an earlier one** -- which is
+// Forth's rule and is what lets a word be redefined at the keyboard without the old one's callers
+// changing meaning, since they hold the cell rather than the name.
+find(vm: &Vm, name: string) -> Option[usize]
+    var i = vm.words.len()
+
+    while i > 0
+        i -= 1
+
+        if vm.words.at(i).name == name then return Some(i)
+
+    None
+end find
+
+// File a word under a name.
+define(vm: &Vm, name: string, def: Cell, immediate: bool, help: string)
+    vm.words.push(Word(name, def, immediate, help))
+
+// File a word written in sysl.
+native(vm: &Vm, name: string, f: *extern(&Vm) -> Result[unit, Fault], help: string)
+    define(vm, name, Native(f), false, help)
+
+// File a word written in sysl that runs even while the reader is compiling. `IF`, `DEF` and `END` are
+// what this is for: they are how a definition gets its shape, so they cannot wait until it is run.
+immediate_native(vm: &Vm, name: string, f: *extern(&Vm) -> Result[unit, Fault], help: string)
+    define(vm, name, Native(f), true, help)
