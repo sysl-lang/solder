@@ -158,10 +158,7 @@ end w_emit
 // The stack as it stands, deepest first, without disturbing it. The one word a person types when
 // they have lost track.
 private w_show_stack(vm: &Vm) -> Result[unit, Fault]
-    emit(vm, "<" + str(depth(vm)) + ">")
-
-    for i in 0..<depth(vm)
-        emit(vm, " " + show(vm.data.at(i), vm.base))
+    emit(vm, stack_view(vm))
 
     Ok(())
 end w_show_stack
@@ -351,6 +348,24 @@ private w_bye(vm: &Vm) -> Result[unit, Fault]
     Ok(())
 end w_bye
 
+// --- The trace --------------------------------------------------------------------------------
+
+private w_debug_on(vm: &Vm) -> Result[unit, Fault]
+    vm.tracing = true
+
+    emit(vm, "tracing on\n")
+
+    Ok(())
+end w_debug_on
+
+private w_debug_off(vm: &Vm) -> Result[unit, Fault]
+    vm.tracing = false
+
+    emit(vm, "tracing off\n")
+
+    Ok(())
+end w_debug_off
+
 // --- The base ---------------------------------------------------------------------------------
 
 private set_base(vm: &Vm, n: int) -> Result[unit, Fault]
@@ -422,6 +437,8 @@ private install_core(vm: &Vm)
     native(vm, ".S", w_show_stack, "( -- ) print the stack without disturbing it")
     native(vm, "WORDS", w_words, "( -- ) print every word in the dictionary")
     native(vm, "HELP", w_help, "( -- ) print what the word named after it does")
+    native(vm, "DEBUG-ON", w_debug_on, "( -- ) echo every token and the stack it leaves")
+    native(vm, "DEBUG-OFF", w_debug_off, "( -- ) stop echoing")
     native(vm, "BL", w_bl, "( -- 32 ) the space character")
     native(vm, "BYE", w_bye, "( -- ) ask the console to stop")
     native(vm, "NULL", w_null, "( -- null )")

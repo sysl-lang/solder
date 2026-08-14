@@ -107,6 +107,11 @@ struct Vm
     // early return; here the two are separate and a definition that leaves early cannot damage the
     // loop it leaves.
     loops: Buf[Count]
+    // Whether `DEBUG-ON` has been run: every token is echoed with the stack it left behind.
+    //
+    // **It survives `reset`**, because a refusal is usually the thing being traced -- turning the
+    // trace off as part of recovering from the mistake would take it away at the moment it is wanted.
+    tracing: bool
     // Whether `BYE` has been typed. A console reads it and stops; nothing else in the language does
     // anything about it, because where there is to go is the console's question and not the
     // language's -- a hosted program returns from `main` and a board has nowhere to return to.
@@ -120,7 +125,7 @@ end Vm
 // **The core words are not here**, so that this file has no dependency on the vocabulary and the
 // vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
 // consumer calls.
-bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, false, buf(), "", buf(), buf(), false, 10)
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, false, buf(), "", buf(), buf(), false, false, 10)
 
 // Everything the program has printed since the interpreter was made.
 transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())
@@ -158,6 +163,20 @@ end pop2
 
 // How deep the data stack is. `.S` prints it and the tests read it.
 depth(vm: &Vm) -> usize = vm.data.len()
+
+// The stack as `.S` shows it: how many cells, then the cells themselves, deepest first.
+//
+// **`.S` and the trace print the same thing**, which is the whole reason this is a function rather
+// than a loop inside `.S`: a person who has learned to read one has learned to read the other, and a
+// trace in a different format would be a second notation for the one thing being looked at.
+stack_view(vm: &Vm) -> string
+    var out = "<" + str(depth(vm)) + ">"
+
+    for i in 0..<depth(vm)
+        out = out + " " + show(vm.data.at(i), vm.base)
+
+    out
+end stack_view
 
 // The entry a name is filed under, if any.
 //

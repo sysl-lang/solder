@@ -69,7 +69,7 @@ branch; and **a colour, a moment, a coordinate and a complex number can be built
 original has all four in its cell and no word in front of any of them, so they were reachable from C
 and unreachable from the language.
 
-**Twenty-three of the original's words are not here, and all but three of them cannot be.**
+**Twenty-one of the original's words are not here, and all but one of them cannot be.**
 
 **Sixteen are memory introspection, and they are test scaffolding rather than language**: `REFCOUNT`,
 `REFCOUNT-EXPECT`, `CELL-SHARED?`, `FORCE-COLLECT`, `CELL-ADDR`, `MEM-STATS` and their neighbours are
@@ -87,7 +87,30 @@ the runtime directly and it needs no name.
 
 **`INDEX` is the pointer** named in the table above.
 
-The three that could exist and do not are `DEBUG-ON`, `DEBUG-OFF` and `TEST`.
+The one that could exist and does not is `TEST`, the original's runner for its own C test files;
+SOLDER's tests are `@test` functions that `sysl test .` runs.
+
+**`DEBUG-ON` and `DEBUG-OFF` are here and do something different.** In the original they set a global
+that makes `debug(…)` calls scattered through the C print `[DEBUG file.c:123] …`, and the interpreter's
+contribution to that is `executing cell type: 4` — a tag number rather than a word. Here they echo
+each *token* with the stack it left behind, in the same notation `.S` prints:
+
+```
+solder> DEBUG-ON 1 2 +
+tracing on
+[DEBUG-ON] <0>
+[1] <1> 1
+[2] <2> 1 2
+[+] <1> 3
+```
+
+A token that went into a definition says so instead — `[2 compiled]` — and the two are told apart by
+**which branch the reader took**, not by what mode it was in: `DEF` is read while not compiling and
+`END` while compiling, and both of them *run*, being immediate.
+
+The trace stops at the token, and that is a limit rather than a preference: a compiled cell has
+deliberately forgotten which name it came from, which is the fold that removed C's `word_idx`. What
+the original prints from inside a definition is a tag number, so nothing readable is lost.
 
 ## Vocabulary
 
@@ -102,6 +125,7 @@ The three that could exist and do not are `DEBUG-ON`, `DEBUG-OFF` and `TEST`.
 | arrays and objects | `[]` `,` `LENGTH` `INDEX@` `INDEX!` `{}` `PUT` `GET` `HAS?` `KEYS` `VALUES` `ENTRIES` `FROM-ENTRIES` |
 | floating point | `SIN` `COS` `TAN` `ASIN` `ACOS` `ATAN` `ATAN2` `EXP` `LN` `LOG10` `**` `SQRT` `FLOOR` `CEIL` `ROUND` `TRUNC` `FMOD` `PI` `E` |
 | printing and the base | `PR` `CR` `SPACE` `EMIT` `WORDS` `HELP` `DECIMAL` `HEX` `BINARY` `OCTAL` `BASE` |
+| the trace | `DEBUG-ON` `DEBUG-OFF` |
 | the four other cells | `RGB` `RED` `GREEN` `BLUE` `DATETIME` `EPOCH` `TZ` `COORD` `LON` `LAT` `COMPLEX` `RE` `IM` |
 | text | `FORMAT` `PRINTF` `STRING-EMPTY?` |
 | values | `NULL` `UNDEFINED?` `BL` `BYE` |
@@ -155,7 +179,7 @@ it, so the capability costs nothing that is not already spent.
 sysl test .
 ```
 
-A hundred and ten of them, and nearly all are asserted through the transcript — what a person
+A hundred and seventeen of them, and nearly all are asserted through the transcript — what a person
 typing would see — rather than through the stack, because the transcript is what is promised.
 
 ## The consoles

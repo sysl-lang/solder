@@ -19,7 +19,7 @@ run(vm: &Vm, src: string) -> Result[unit, Fault]
 
         vm.pos = next
 
-        token match
+        val compiled = token match
             Eof -> return Ok(())
             // A string literal is a value whichever mode the reader is in, so there is nothing to
             // decide about it that is not decided about every other value.
@@ -27,12 +27,43 @@ run(vm: &Vm, src: string) -> Result[unit, Fault]
             Name(s) -> word(vm, s)?
 
         settle(vm)?
+        trace(vm, token, compiled)
 
     Ok(())
 end run
 
-// One name, as a number, as a word, or as a mistake.
-private word(vm: &Vm, name: string) -> Result[unit, Fault]
+// The token as it was typed, for the trace.
+private spell(token: Token) -> string
+    token match
+        Name(s) -> s
+        Quoted(s) -> "\"" + s + "\""
+        Eof -> ""
+end spell
+
+// Echo one token, when `DEBUG-ON` has asked for it.
+//
+// **The trace is at the token rather than inside a definition**, and that is a limit rather than a
+// preference: a compiled cell has deliberately forgotten which name it came from, which is the fold
+// that removed C's `word_idx`. The original traces the inside of a definition and gets no further --
+// `executing cell type: 4`, a tag number rather than a word -- so what is here is the more useful
+// half of what it prints, and the half it could not print is a number nobody can read anyway.
+//
+// **What is reported is which branch the token took, not what mode the interpreter was in.** The two
+// come apart at exactly the words that matter: `DEF` is read while not compiling and `END` while
+// compiling, and *both* of them run rather than being compiled, because they are immediate. Reading
+// `vm.compiling` before the token gets `DEF` right and `END` wrong, and reading it after does the
+// reverse; asking the reader which thing it did is right for both.
+private trace(vm: &Vm, token: Token, compiled: bool)
+    if !vm.tracing then return
+
+    if compiled
+        emit(vm, "[" + spell(token) + " compiled]\n")
+    else
+        emit(vm, "[" + spell(token) + "] " + stack_view(vm) + "\n")
+
+// One name, as a number, as a word, or as a mistake. Answers whether it was compiled rather than run,
+// which is what the trace reports and what nothing else could work out afterwards.
+private word(vm: &Vm, name: string) -> Result[bool, Fault]
     // **A number wins over a word of the same spelling**, which matters in base sixteen where `ABS`
     // is both a name and a hexadecimal number. Forth resolves it the other way about; reading it as
     // the number is what makes `HEX FF` mean 255 without a prefix, and a name that is unreachable in
@@ -51,20 +82,24 @@ private word(vm: &Vm, name: string) -> Result[unit, Fault]
             if vm.compiling && !w.immediate
                 vm.building.push(w.def)
 
-                Ok(())
+                Ok(true)
             else
-                execute(vm, w.def)
+                execute(vm, w.def)?
+
+                Ok(false)
         None -> bad("'" + name + "' is not a word")
 end word
 
-// A value the reader has just made: onto the stack, or into the definition being built.
-private take(vm: &Vm, c: Cell) -> Result[unit, Fault]
+// A value the reader has just made: onto the stack, or into the definition being built. Answers which.
+private take(vm: &Vm, c: Cell) -> Result[bool, Fault]
     if vm.compiling
         vm.building.push(c)
+
+        Ok(true)
     else
         push(vm, c)
 
-    Ok(())
+        Ok(false)
 end take
 
 // Run an anonymous definition the moment its structure closes.
