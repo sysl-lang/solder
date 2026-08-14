@@ -149,7 +149,7 @@ underneath itself.
 
 ```
 dependencies {
-  solder { git = "github.com/sysl-lang/solder", version = "0.3.0" }
+  solder { git = "github.com/sysl-lang/solder", version = "0.4.0" }
 }
 ```
 
@@ -198,7 +198,7 @@ package bought.
 
 ## Status
 
-The language runs, and is tagged `v0.3.0`. The board image builds and links; nothing has been run on
+The language runs, and is tagged `v0.4.0`. The board image builds and links; nothing has been run on
 real silicon yet.
 
 ## Licence
