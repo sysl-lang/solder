@@ -69,12 +69,25 @@ branch; and **a colour, a moment, a coordinate and a complex number can be built
 original has all four in its cell and no word in front of any of them, so they were reachable from C
 and unreachable from the language.
 
-**Twenty-six of the original's words are not here, and all but three of them cannot be.** Fifteen are
-refcount and memory introspection — `REFCOUNT`, `MEM-STATS`, `CELL-SHARED?`, `INTERN-COUNT` and their
-neighbours — which have no counterpart when the counting is the language's, there is no intern pool
-and a cell has no address a program can see. Three are `(DO)`, `(LOOP)` and `(+LOOP)`, the runtime
-halves of the counted loop, which are internal here rather than words. `INDEX` is the pointer named
-in the table above. The three that could exist and do not are `DEBUG-ON`, `DEBUG-OFF` and `TEST`.
+**Twenty-three of the original's words are not here, and all but three of them cannot be.**
+
+**Sixteen are memory introspection, and they are test scaffolding rather than language**: `REFCOUNT`,
+`REFCOUNT-EXPECT`, `CELL-SHARED?`, `FORCE-COLLECT`, `CELL-ADDR`, `MEM-STATS` and their neighbours are
+registered by `src/test.c` and `src/test_refcount.c`, and Metal's own C tests drive them —
+`TEST_INTERPRET("REFCOUNT")` appears thirteen times. **They exist because the counting is
+hand-written and can be wrong**, so the suite has to interrogate it from inside the language. Here
+the counting is the compiler's, so there is nothing for such a test to assert; and there is no
+address a program can see, and no intern pool for `INTERN-COUNT` or `STRING-SAME-PTR?` to answer
+about, since a `string` is already shared.
+
+**Three are `(DO)`, `(LOOP)` and `(+LOOP)`** — the runtime halves of the counted loop. `DO` in the
+original compiles a reference to `(DO)` and so has to `find_word` it, which means the dictionary
+publishes a word that corrupts the return stack if anybody types it. Here the compiling word plants
+the runtime directly and it needs no name.
+
+**`INDEX` is the pointer** named in the table above.
+
+The three that could exist and do not are `DEBUG-ON`, `DEBUG-OFF` and `TEST`.
 
 ## Vocabulary
 
