@@ -1,0 +1,55 @@
+module sh.sysl.solder
+
+// The read-run-print loop, which is the same on every machine SOLDER runs on.
+//
+// **It lives in the language rather than in each console, because there is more than one console and
+// there will be more.** Written out per platform, this loop would be several copies of twenty lines
+// that drift: the one somebody uses daily grows a fix, the others do not, and the difference then
+// reads as a *board* bug rather than as a console nobody updated.
+//
+// **`*Iterate[string]` is what makes one loop serve all of them.** A `sysl.term.edit.Editor` and a
+// `sysl.io.Lines` are both one, so the platform decides which to build and nothing below that line
+// knows the difference. What is left for a console is to name its streams and print its own banner.
+//
+// **The interpreter is a parameter rather than made here**, which is what makes this testable: a test
+// hands it a cursor over a byte script and reads `transcript` afterwards.
+
+// Every line the cursor yields, run, with whatever it printed shown as it goes.
+//
+// Returns when the cursor ends or when `BYE` is typed on a line of its own. **What to do about that
+// is the caller's**, and the two answers differ: a hosted program returns from `main`, while a board
+// has nowhere to exit *to* and says so rather than falling off the end.
+//
+// ## The continuation prompt, and why it is not the one Ogol has
+//
+// **SOLDER's unfinished state lives in the interpreter rather than in this loop.** `DEF SQUARE` on
+// one line and `DUP * END` on the next is a definition typed in two pieces, and it works because
+// `vm.compiling` and the body being built survive a call to `run` -- so the console asks `pending`
+// and prints `....`, and there is nothing here to buffer.
+//
+// **A `More` is therefore a refusal here, not a continuation**, which is the opposite of what a
+// language that parses a whole line before running any of it can do. A Forth executes as it reads: by
+// the time an unterminated string literal is reached, the words before it have already run, and
+// re-running the line with the rest appended would run them a second time. Reporting it and clearing
+// what is half-built is the honest answer, and the case it costs -- a string literal split across two
+// lines -- is one nobody types.
+session(vm: &Vm, cursor: *Iterate[string])
+    prints("solder> ")
+
+    for line in cursor
+        if !pending(vm) && line == "BYE" then break
+
+        run(vm, line) match
+            Ok(_) -> prints(drain(vm))
+            Err(f) ->
+                // Whatever the line printed before it went wrong is still owed to the reader: a `PR`
+                // that ran is a `PR` that happened, and swallowing it would make the transcript
+                // disagree with what the program did.
+                prints(drain(vm))
+                reset(vm)
+                print(describe(f))
+
+        prints(if pending(vm) then ".... " else "\nsolder> ")
+
+    print("")
+end session

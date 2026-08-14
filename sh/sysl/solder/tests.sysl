@@ -2,6 +2,7 @@ module sh.sysl.solder
 @tests
 
 import sysl.buf.{Buf, buf}
+import sysl.io.{bytes_reader, console_lines}
 
 // SOLDER's own tests, run on the host by `sysl test .`.
 
@@ -570,3 +571,54 @@ a_refusal_leaves_the_next_line_workable()
     run(vm, "2 3 + PR").unwrap()
 
     assert_eq(transcript(vm), "5")
+
+// --- The session loop -----------------------------------------------------------------------------
+
+// A scripted console: the lines a person would have typed, fed to `session`.
+//
+// **What it can assert is the interpreter afterwards, not the transcript**, because `session` prints
+// its prompts to the real output as they are typed and drains the interpreter as it goes -- which is
+// the whole reason the prompt cannot go through the transcript. So these check what the session left
+// behind.
+private typed(vm: &Vm, script: string)
+    var input = bytes_reader(script.bytes)
+    var cursor = console_lines(&input)
+
+    session(vm, &cursor)
+
+@test
+a_session_files_what_was_defined_and_leaves_the_answer_on_the_stack()
+    val vm = solder()
+
+    typed(vm, "DEF TWICE 2 * END\n21 TWICE\n")
+
+    assert_eq(depth(vm), 1)
+    assert(same(vm.data.at(0), Int(42)))
+
+@test
+a_session_takes_a_definition_a_line_at_a_time()
+    val vm = solder()
+
+    typed(vm, "DEF TWICE\n2 *\nEND\n5 TWICE\n")
+
+    assert(!pending(vm))
+    assert_eq(depth(vm), 1)
+    assert(same(vm.data.at(0), Int(10)))
+
+@test
+bye_ends_a_session_and_what_follows_is_not_read()
+    val vm = solder()
+
+    typed(vm, "1\nBYE\n2\n")
+
+    assert_eq(depth(vm), 1)
+
+@test
+a_refusal_clears_what_was_half_built_and_the_session_carries_on()
+    val vm = solder()
+
+    typed(vm, "DEF TWICE 2 * END\n1 0 /\n8 TWICE\n")
+
+    assert(!pending(vm))
+    assert_eq(depth(vm), 1)
+    assert(same(vm.data.at(0), Int(16)))
