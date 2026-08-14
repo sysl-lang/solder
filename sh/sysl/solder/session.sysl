@@ -12,7 +12,18 @@ module sh.sysl.solder
 // knows the difference. What is left for a console is to name its streams and print its own banner.
 //
 // **The interpreter is a parameter rather than made here**, which is what makes this testable: a test
-// hands it a cursor over a byte script and reads `transcript` afterwards.
+// hands it a cursor over a byte script and reads what the session left behind.
+
+// Whether text ends where the next thing printed would start a line of its own.
+//
+// **The prompt is written from this rather than unconditionally after a newline**, because a Forth
+// prints exactly what it was told to: `7 SQUARE PR CR` ends its own line and `7 SQUARE PR` does not,
+// and a loop that always broke first would put a blank line under everything that used `CR`.
+private ends_a_line(s: string) -> bool
+    val b = s.bytes
+
+    b.len == 0 || b[b.len - 1] == 10
+end ends_a_line
 
 // Every line the cursor yields, run, with whatever it printed shown as it goes.
 //
@@ -20,12 +31,13 @@ module sh.sysl.solder
 // is the caller's**, and the two answers differ: a hosted program returns from `main`, while a board
 // has nowhere to exit *to* and says so rather than falling off the end.
 //
-// ## The continuation prompt, and why it is not the one Ogol has
+// ## The continuation prompt, and why it is not the one a parsed language has
 //
 // **SOLDER's unfinished state lives in the interpreter rather than in this loop.** `DEF SQUARE` on
-// one line and `DUP * END` on the next is a definition typed in two pieces, and it works because
-// `vm.compiling` and the body being built survive a call to `run` -- so the console asks `pending`
-// and prints `....`, and there is nothing here to buffer.
+// one line and `DUP * END` on the next is a definition typed in two pieces; `5 0 DO I PR` and then
+// `LOOP` is an anonymous one. Both work because `vm.compiling` and the body being built survive a
+// call to `run` -- so the console asks `pending` and prints `....`, and there is nothing here to
+// buffer.
 //
 // **A `More` is therefore a refusal here, not a continuation**, which is the opposite of what a
 // language that parses a whole line before running any of it can do. A Forth executes as it reads: by
@@ -39,17 +51,26 @@ session(vm: &Vm, cursor: *Iterate[string])
     for line in cursor
         if !pending(vm) && line == "BYE" then break
 
-        run(vm, line) match
-            Ok(_) -> prints(drain(vm))
-            Err(f) ->
-                // Whatever the line printed before it went wrong is still owed to the reader: a `PR`
-                // that ran is a `PR` that happened, and swallowing it would make the transcript
-                // disagree with what the program did.
-                prints(drain(vm))
-                reset(vm)
-                print(describe(f))
+        var fault = ""
 
-        prints(if pending(vm) then ".... " else "\nsolder> ")
+        run(vm, line) match
+            Ok(_) -> ()
+            // Whatever the line printed before it went wrong is still owed to the reader: a `PR` that
+            // ran is a `PR` that happened, and swallowing it would make what is on the screen
+            // disagree with what the program did. So the output goes out first and the refusal after.
+            Err(f) ->
+                fault = describe(f)
+
+                reset(vm)
+
+        val out = drain(vm)
+
+        prints(out)
+
+        if !ends_a_line(out) then print("")
+        if fault != "" then print(fault)
+
+        prints(if pending(vm) then ".... " else "solder> ")
 
     print("")
 end session

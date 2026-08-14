@@ -350,10 +350,49 @@ if_runs_one_arm_or_the_other()
     assert_eq(ran("DEF SIGN 0< IF \"neg\" PR ELSE \"pos\" PR THEN END -3 SIGN 4 SIGN"), "negpos")
     assert_eq(ran("DEF MAYBE IF \"yes\" PR THEN END TRUE MAYBE FALSE MAYBE"), "yes")
 
+// An opening control word at the prompt builds an anonymous definition and waits; a closing one with
+// nothing open has nothing to close and says so.
 @test
-a_control_word_outside_a_definition_is_refused()
-    assert_eq(ran("IF"), "error: 'IF' is for inside a definition")
-    assert_eq(ran("THEN"), "error: 'THEN' is for inside a definition")
+a_closing_control_word_with_nothing_open_is_refused()
+    assert_eq(ran("THEN"), "error: 'THEN' has nothing open before it")
+    assert_eq(ran("REPEAT"), "error: 'REPEAT' has nothing open before it")
+    assert_eq(ran("OF"), "error: 'OF' has no 'CASE' before it")
+
+@test
+an_opening_control_word_at_the_prompt_waits_for_its_partner()
+    val vm = solder()
+
+    run(vm, "1 IF \"yes\" PR").unwrap()
+
+    assert(pending(vm))
+    assert_eq(transcript(vm), "")
+
+    run(vm, "THEN").unwrap()
+
+    assert(!pending(vm))
+    assert_eq(transcript(vm), "yes")
+
+@test
+a_loop_may_be_typed_at_the_prompt_with_no_definition_around_it()
+    assert_eq(ran("5 0 DO I PR LOOP"), "01234")
+    assert_eq(ran("1 IF \"yes\" PR ELSE \"no\" PR THEN"), "yes")
+    assert_eq(ran("VARIABLE N 3 N ! BEGIN N @ PR N 1-! N @ 0= UNTIL"), "321")
+
+// An anonymous definition is run and thrown away, so nothing is filed and the dictionary is the size
+// it was.
+@test
+an_anonymous_definition_is_not_filed()
+    val vm = solder()
+    val before = vm.words.len()
+
+    run(vm, "2 0 DO I PR LOOP").unwrap()
+
+    assert_eq(vm.words.len(), before)
+    assert_eq(transcript(vm), "01")
+
+@test
+a_definition_may_not_be_opened_inside_a_control_structure() =
+    assert_eq(ran("1 IF DEF X"), "error: 'DEF' inside a control structure that is still open")
 
 @test
 a_control_word_closing_the_wrong_thing_is_refused_by_name() =

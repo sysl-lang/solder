@@ -26,6 +26,8 @@ run(vm: &Vm, src: string) -> Result[unit, Fault]
             Quoted(s) -> take(vm, Text(s))?
             Name(s) -> word(vm, s)?
 
+        settle(vm)?
+
     Ok(())
 end run
 
@@ -64,6 +66,24 @@ private take(vm: &Vm, c: Cell) -> Result[unit, Fault]
 
     Ok(())
 end take
+
+// Run an anonymous definition the moment its structure closes.
+//
+// **This is what makes a loop typeable at the prompt.** An opening control word with no `DEF` around
+// it begins an anonymous body; every token after it is compiled rather than run; and when the last
+// mark is taken off `vm.ctrl` the body is complete, so it runs and is thrown away. Nothing files it,
+// which is the difference from `END` -- there is no name and nothing to call it by afterwards.
+private settle(vm: &Vm) -> Result[unit, Fault]
+    if !vm.anon || !vm.compiling || !vm.ctrl.is_empty() then return Ok(())
+
+    val body = vm.building
+
+    vm.anon = false
+    vm.compiling = false
+    vm.building = buf()
+
+    execute(vm, Code(body))
+end settle
 
 // Do one cell.
 //
@@ -140,6 +160,7 @@ end next_name
 
 // Begin a definition. `DEF SQUARE DUP * END` -- the name comes from the text, not from the stack.
 def_word(vm: &Vm) -> Result[unit, Fault]
+    if vm.anon then return bad("'DEF' inside a control structure that is still open")
     if vm.compiling then return bad("'DEF' inside a definition -- 'END' closes the one already open")
 
     val name = next_name(vm, "DEF")?
@@ -158,6 +179,7 @@ end def_word
 // branch that has no distance. `vm.ctrl` holding anything means an `IF` or a `BEGIN` never met its
 // partner, and saying so is more use than a definition that runs and jumps somewhere arbitrary.
 end_word(vm: &Vm) -> Result[unit, Fault]
+    if vm.anon then return bad("'END' inside a control structure that is still open")
     if !vm.compiling then return bad("'END' with no 'DEF' open")
 
     if !vm.ctrl.is_empty()
@@ -188,6 +210,7 @@ pending(vm: &Vm) -> bool = vm.compiling
 // reason to lose the nine before it, and a person who wants them gone makes a fresh interpreter.
 reset(vm: &Vm)
     vm.compiling = false
+    vm.anon = false
     vm.building = buf()
     vm.building_name = ""
 

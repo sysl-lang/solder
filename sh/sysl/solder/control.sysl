@@ -1,15 +1,21 @@
 module sh.sysl.solder
 
+import sysl.buf.buf
+
 // The control words.
 //
 // **Every one of them is immediate and every one of them only compiles**, which is what makes control
 // flow a vocabulary rather than syntax: `IF` plants a branch with no distance in it and `THEN` fills
 // the distance in, so the reader that meets them knows nothing about either.
 //
-// **They are refused outside a definition**, and that is a choice rather than an accident of the
-// implementation. A branch is a distance inside a body, and at the keyboard there is no body -- Forth
-// answers this by having the interpreter build an anonymous one, which means a mistyped `IF` at a
-// prompt silently swallows the rest of the line.
+// **An opening control word typed at the prompt builds an anonymous definition**, which runs the
+// moment its structure closes. A branch is a distance inside a body and at the keyboard there is no
+// body, so one has to be made -- and the alternative, refusing them outside a definition, would mean
+// an interactive language in which `5 0 DO I PR LOOP` cannot be typed. That is not a language anybody
+// would use a prompt for.
+//
+// **What it costs is that a mistyped opener swallows what follows** until its partner arrives or the
+// line is abandoned, which is why `pending` reports it and a console shows a different prompt.
 
 // Where the next cell will go.
 private here(vm: &Vm) -> usize = vm.building.len()
@@ -45,7 +51,7 @@ private jump_back(vm: &Vm, target: usize, conditional: bool)
 
 // The mark a closing word expects, or a refusal saying what it found instead.
 private take_mark(vm: &Vm, name: string, wanted: MarkKind) -> Result[Mark, Fault]
-    if !vm.compiling then return bad("'" + name + "' is for inside a definition")
+    if !vm.compiling then return bad("'" + name + "' has nothing open before it")
 
     vm.ctrl.pop() match
         Some(m) ->
@@ -79,9 +85,21 @@ private opened(k: MarkKind) -> string
         EndofMark -> "an 'ENDOF'"
 end opened
 
-private opening(vm: &Vm, name: string, kind: MarkKind, at: usize) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'" + name + "' is for inside a definition")
+// Begin compiling into an anonymous body, if nothing is being compiled already.
+//
+// **Every opening control word calls this first**, so that the difference between one inside a `DEF`
+// and one at the prompt is a flag rather than two code paths. `run` is what notices the structure has
+// closed and runs the body.
+private begin_anon(vm: &Vm)
+    if !vm.compiling
+        vm.compiling = true
+        vm.anon = true
+        vm.building = buf()
+        vm.building_name = ""
 
+        vm.ctrl.clear()
+
+private opening(vm: &Vm, kind: MarkKind, at: usize) -> Result[unit, Fault]
     vm.ctrl.push(Mark(kind, at))
 
     Ok(())
@@ -90,9 +108,9 @@ end opening
 // --- IF ELSE THEN -----------------------------------------------------------------------------
 
 private w_if(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'IF' is for inside a definition")
+    begin_anon(vm)
 
-    opening(vm, "IF", IfMark, hole(vm, BranchIfFalse(0)))
+    opening(vm, IfMark, hole(vm, BranchIfFalse(0)))
 end w_if
 
 // **`ELSE` closes the `IF` and opens itself**, which is why one word can stand where two structures
@@ -109,7 +127,7 @@ private w_else(vm: &Vm) -> Result[unit, Fault]
 end w_else
 
 private w_then(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'THEN' is for inside a definition")
+    if !vm.compiling then return bad("'THEN' has nothing open before it")
 
     vm.ctrl.pop() match
         Some(m) ->
@@ -126,7 +144,11 @@ end w_then
 
 // --- BEGIN AGAIN UNTIL WHILE REPEAT -------------------------------------------------------------
 
-private w_begin(vm: &Vm) -> Result[unit, Fault] = opening(vm, "BEGIN", BeginMark, here(vm))
+private w_begin(vm: &Vm) -> Result[unit, Fault]
+    begin_anon(vm)
+
+    opening(vm, BeginMark, here(vm))
+end w_begin
 
 private w_again(vm: &Vm) -> Result[unit, Fault]
     val m = take_mark(vm, "AGAIN", BeginMark)?
@@ -147,11 +169,9 @@ private w_until(vm: &Vm) -> Result[unit, Fault]
 end w_until
 
 private w_while(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'WHILE' is for inside a definition")
+    if !vm.compiling || vm.ctrl.is_empty() then return bad("'WHILE' has no 'BEGIN' before it")
 
-    if vm.ctrl.is_empty() then return bad("'WHILE' has no 'BEGIN' before it")
-
-    opening(vm, "WHILE", WhileMark, hole(vm, BranchIfFalse(0)))
+    opening(vm, WhileMark, hole(vm, BranchIfFalse(0)))
 end w_while
 
 private w_repeat(vm: &Vm) -> Result[unit, Fault]
@@ -215,11 +235,10 @@ private plus_loop_step(vm: &Vm) -> Result[unit, Fault]
 end plus_loop_step
 
 private w_do(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'DO' is for inside a definition")
-
+    begin_anon(vm)
     vm.building.push(Native(do_start))
 
-    opening(vm, "DO", DoMark, here(vm))
+    opening(vm, DoMark, here(vm))
 end w_do
 
 // **`LOOP` plants the step and then a branch back that is taken when the step says it is not
@@ -279,10 +298,14 @@ private case_drop(vm: &Vm) -> Result[unit, Fault]
     Ok(())
 end case_drop
 
-private w_case(vm: &Vm) -> Result[unit, Fault] = opening(vm, "CASE", CaseMark, here(vm))
+private w_case(vm: &Vm) -> Result[unit, Fault]
+    begin_anon(vm)
+
+    opening(vm, CaseMark, here(vm))
+end w_case
 
 private w_of(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'OF' is for inside a definition")
+    if !vm.compiling then return bad("'OF' has no 'CASE' before it")
 
     vm.building.push(Native(case_test))
 
@@ -290,7 +313,7 @@ private w_of(vm: &Vm) -> Result[unit, Fault]
 
     vm.building.push(Native(case_drop))
 
-    opening(vm, "OF", IfMark, at)
+    opening(vm, IfMark, at)
 end w_of
 
 // **`ENDOF` closes its arm and leaves a mark for `ENDCASE`**, because every arm has to jump over all
@@ -307,7 +330,7 @@ private w_endof(vm: &Vm) -> Result[unit, Fault]
 end w_endof
 
 private w_endcase(vm: &Vm) -> Result[unit, Fault]
-    if !vm.compiling then return bad("'ENDCASE' is for inside a definition")
+    if !vm.compiling then return bad("'ENDCASE' has no 'CASE' before it")
 
     vm.building.push(Native(case_drop))
 

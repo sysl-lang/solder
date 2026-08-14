@@ -87,6 +87,9 @@ struct Vm
     pos: usize
     // Whether the reader is compiling into `building` rather than executing.
     compiling: bool
+    // Whether what is being built is an **anonymous** definition -- one a control word at the prompt
+    // opened, which runs the moment its structure closes and is never filed under a name.
+    anon: bool
     building: &Buf[Cell]
     // The name the definition under construction will be filed under.
     building_name: string
@@ -113,7 +116,7 @@ end Vm
 // **The core words are not here**, so that this file has no dependency on the vocabulary and the
 // vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
 // consumer calls.
-bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, buf(), "", buf(), buf(), 10)
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, false, buf(), "", buf(), buf(), 10)
 
 // Everything the program has printed since the interpreter was made.
 transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())
