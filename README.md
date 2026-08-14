@@ -128,17 +128,24 @@ sysl test .
 Ninety of them, and nearly all are asserted through the transcript — what a person typing would
 see — rather than through the stack, because the transcript is what is promised.
 
-## The console
+## The consoles
 
-[**solder-host**](https://github.com/sysl-lang/solder-host) is SOLDER at a terminal. The
-read-run-print loop is `session`, in this package, because there is going to be more than one console
-and a loop written out per platform is copies that drift: a console names its streams and prints its
+The read-run-print loop is `session`, in this package, because there is more than one console and a
+loop written out per platform is copies that drift. A console names its streams and prints its
 banner, and that is all it does.
+
+| | |
+|---|---|
+| [**solder-host**](https://github.com/sysl-lang/solder-host) | at a terminal, over `sysl.term.edit` |
+| [**solder-pico2**](https://github.com/sysl-lang/solder-pico2) | on a Raspberry Pi Pico 2 W, over USB serial — 353 KB of flash and 5.3 KB of static RAM, and no C in the project at all |
+
+The two differ in their first few lines and nowhere else, which is what putting the loop in the
+package bought.
 
 ## Status
 
-The language runs, and is tagged `v0.2.0`. It compiles for `thumb-freestanding` as well as the host,
-though nothing has been linked for a board yet and the floating-point words will want a libm there.
+The language runs, and is tagged `v0.2.0`. The board image builds and links; nothing has been run on
+real silicon yet.
 
 ## Licence
 
