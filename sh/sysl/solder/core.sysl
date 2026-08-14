@@ -376,6 +376,7 @@ solder() -> &Vm
     install_core(vm)
     install_arith(vm)
     install_control(vm)
+    install_aggregate(vm)
 
     vm
 end solder

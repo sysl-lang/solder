@@ -395,3 +395,79 @@ case_selects_one_arm_and_drops_the_selector()
     assert_eq(ran(src + "1 NAME .S"), "one<0>")
     assert_eq(ran(src + "2 NAME .S"), "two<0>")
     assert_eq(ran(src + "9 NAME .S"), "many<0>")
+
+// --- Arrays, objects and strings ------------------------------------------------------------------
+
+@test
+an_array_is_built_by_appending() =
+    assert_eq(ran("[] 1 , 2 , 3 , PR"), "[1 2 3]")
+
+@test
+an_array_holds_cells_of_any_kind() =
+    assert_eq(ran("[] 1 , \"two\" , TRUE , PR"), "[1 two TRUE]")
+
+@test
+an_array_nested_in_another_keeps_its_brackets() =
+    assert_eq(ran("[] 1 , [] 2 , 3 , , PR"), "[1 [2 3]]")
+
+@test
+an_element_is_read_and_written_by_index()
+    assert_eq(ran("[] 10 , 20 , 30 , 1 INDEX@ PR"), "20")
+    assert_eq(ran("[] 10 , 20 , DUP 99 SWAP 0 INDEX! PR"), "[99 20]")
+
+@test
+an_index_past_the_end_is_refused() =
+    assert_eq(ran("[] 1 , 5 INDEX@"), "error: 'INDEX@' asked for 5 of 1 elements")
+
+@test
+length_answers_for_all_three_kinds()
+    assert_eq(ran("[] 1 , 2 , LENGTH PR"), "2")
+    assert_eq(ran("{} \"a\" 1 PUT LENGTH PR"), "1")
+    assert_eq(ran("\"hello\" LENGTH PR"), "5")
+
+// A string's length is in characters rather than bytes, which is the count the person asking means.
+@test
+a_length_in_characters_is_not_a_length_in_bytes() =
+    assert_eq(ran("\"héllo\" LENGTH PR"), "5")
+
+@test
+an_object_is_built_by_putting() =
+    assert_eq(ran("{} \"x\" 1 PUT \"y\" 2 PUT PR"), "{x: 1 y: 2}")
+
+@test
+putting_a_key_twice_replaces_it() =
+    assert_eq(ran("{} \"x\" 1 PUT \"x\" 2 PUT PR"), "{x: 2}")
+
+@test
+a_key_nobody_put_reads_as_undefined()
+    assert_eq(ran("{} \"x\" 1 PUT \"x\" GET PR"), "1")
+    assert_eq(ran("{} \"x\" GET PR"), "undefined")
+    assert_eq(ran("{} \"x\" GET UNDEFINED? PR"), "TRUE")
+
+@test
+has_answers_without_disturbing_the_object() =
+    assert_eq(ran("{} \"x\" 1 PUT \"x\" HAS? PR PR"), "TRUE{x: 1}")
+
+@test
+an_objects_parts_come_back_as_arrays()
+    assert_eq(ran("{} \"a\" 1 PUT \"b\" 2 PUT KEYS PR"), "[a b]")
+    assert_eq(ran("{} \"a\" 1 PUT \"b\" 2 PUT VALUES PR"), "[1 2]")
+    assert_eq(ran("{} \"a\" 1 PUT ENTRIES PR"), "[[a 1]]")
+
+@test
+entries_and_from_entries_are_inverses() =
+    assert_eq(ran("{} \"a\" 1 PUT \"b\" 2 PUT ENTRIES SWAP DROP FROM-ENTRIES PR"), "{a: 1 b: 2}")
+
+@test
+an_array_is_shared_rather_than_copied() =
+    assert_eq(ran("[] 1 , CONSTANT XS XS 2 , DROP XS PR"), "[1 2]")
+
+@test
+strings_join_with_the_same_sign_numbers_add_with()
+    assert_eq(ran("\"foo\" \"bar\" + PR"), "foobar")
+    assert_eq(ran("\"\" STRING-EMPTY? PR"), "TRUE")
+    assert_eq(ran("\"x\" STRING-EMPTY? PR"), "FALSE")
+
+@test
+two_arrays_with_the_same_elements_are_equal() =
+    assert_eq(ran("[] 1 , 2 , [] 1 , 2 , = PR"), "TRUE")

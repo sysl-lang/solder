@@ -133,7 +133,20 @@ private binary(vm: &Vm, name: string, op: Op) -> Result[unit, Fault]
     Ok(())
 end binary
 
-private w_add(vm: &Vm) -> Result[unit, Fault] = binary(vm, "+", Add)
+// **`+` concatenates two strings**, which the C original does not do -- it has no string concatenation
+// word at all, so a program that wants to join two has nowhere to go. Overloading the sign is what
+// every language with both does, and the alternative is a second name for an operation everybody
+// already spells this way.
+private w_add(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "+")?
+
+    if is_text(a) && is_text(b)
+        push(vm, Text(text(a) + text(b)))
+    else
+        push(vm, arith("+", Add, a, b)?)
+
+    Ok(())
+end w_add
 private w_sub(vm: &Vm) -> Result[unit, Fault] = binary(vm, "-", Sub)
 private w_mul(vm: &Vm) -> Result[unit, Fault] = binary(vm, "*", Mul)
 private w_div(vm: &Vm) -> Result[unit, Fault] = binary(vm, "/", Div)

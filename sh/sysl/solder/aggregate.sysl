@@ -1,0 +1,255 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+
+// Arrays, objects and the words that read strings.
+//
+// **This is where the reference counting is actually exercised**, and so where the port's argument is
+// either true or not. An array is a shared, mutable thing: `[] 1 , 2 ,` leaves one array on the stack
+// that two words appended to, and a cell holding it may be copied into another array, stored in a
+// variable, or dropped. In C that is `array_t*` with a `refcount` field and a `release` that walks the
+// elements before freeing -- called by hand, from the right places, or it leaks. Here it is
+// `&Buf[Cell]`, and there is nothing to call.
+
+// --- Arrays -----------------------------------------------------------------------------------
+
+private w_new_array(vm: &Vm) -> Result[unit, Fault]
+    var items: Buf[Cell] = buf()
+
+    push(vm, Arr(items))
+
+    Ok(())
+end w_new_array
+
+// `array item ,` appends and leaves the array, so `[] 1 , 2 , 3 ,` builds one in a line.
+private w_append(vm: &Vm) -> Result[unit, Fault]
+    val (target, item) = pop2(vm, ",")?
+
+    target match
+        Arr(items) ->
+            items.push(item)
+            push(vm, target)
+
+            Ok(())
+        _ -> bad("',' wants an array to append to -- it got " + kind(target))
+end w_append
+
+// How long a thing is: an array's elements, an object's keys, a string's characters.
+//
+// **A string answers in characters rather than bytes**, which is the answer somebody asking a
+// question about text means. It costs a walk of the string, and the alternative -- answering in bytes
+// because that is what is stored -- makes `LENGTH` disagree with what the same person would count.
+private w_length(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "LENGTH")?
+
+    a match
+        Arr(items) -> push(vm, Int(int(items.len())))
+        Obj(entries) -> push(vm, Int(int(entries.len())))
+        Text(s) ->
+            var n = 0
+
+            for _ in s.chars
+                n += 1
+
+            push(vm, Int(n))
+        _ -> return bad("'LENGTH' wants an array, an object or a string -- it got " + kind(a))
+
+    Ok(())
+end w_length
+
+// An index that is inside the array, or a refusal saying what was asked for and what there was.
+private at(name: string, items: &Buf[Cell], n: Cell) -> Result[usize, Fault]
+    n match
+        Int(v) ->
+            if v < 0 || usize(v) >= items.len()
+                bad("'" + name + "' asked for " + str(v) + " of " + str(items.len()) + " elements")
+            else
+                Ok(usize(v))
+        _ -> bad("'" + name + "' wants an index -- it got " + kind(n))
+end at
+
+private w_index_fetch(vm: &Vm) -> Result[unit, Fault]
+    val (target, n) = pop2(vm, "INDEX@")?
+
+    target match
+        Arr(items) ->
+            push(vm, items.at(at("INDEX@", items, n)?))
+
+            Ok(())
+        _ -> bad("'INDEX@' wants an array -- it got " + kind(target))
+end w_index_fetch
+
+private w_index_store(vm: &Vm) -> Result[unit, Fault]
+    val n = pop(vm, "INDEX!")?
+    val (value, target) = pop2(vm, "INDEX!")?
+
+    target match
+        Arr(items) ->
+            items.set(at("INDEX!", items, n)?, value)
+
+            Ok(())
+        _ -> bad("'INDEX!' wants an array -- it got " + kind(target))
+end w_index_store
+
+// --- Objects ----------------------------------------------------------------------------------
+
+private w_new_object(vm: &Vm) -> Result[unit, Fault]
+    var entries: Buf[Entry] = buf()
+
+    push(vm, Obj(entries))
+
+    Ok(())
+end w_new_object
+
+private keyed(name: string, c: Cell) -> Result[string, Fault]
+    if is_text(c) then Ok(text(c)) else bad("'" + name + "' wants a string key -- it got " + kind(c))
+
+private fields_of(name: string, c: Cell) -> Result[&Buf[Entry], Fault]
+    c match
+        Obj(entries) -> Ok(entries)
+        _ -> bad("'" + name + "' wants an object -- it got " + kind(c))
+end fields_of
+
+private slot_for(entries: &Buf[Entry], key: string) -> Option[usize]
+    for i in 0..<entries.len()
+        if entries.at(i).key == key then return Some(i)
+
+    None
+end slot_for
+
+// `object key value PUT` -- and it leaves the object, so several `PUT`s read as one phrase.
+private w_put(vm: &Vm) -> Result[unit, Fault]
+    val value = pop(vm, "PUT")?
+    val (target, k) = pop2(vm, "PUT")?
+    val entries = fields_of("PUT", target)?
+    val key = keyed("PUT", k)?
+
+    slot_for(entries, key) match
+        Some(i) -> entries.set(i, Entry(key, value))
+        None -> entries.push(Entry(key, value))
+
+    push(vm, target)
+
+    Ok(())
+end w_put
+
+// `object key GET` -- the object stays, and a key nobody put answers `undefined`.
+//
+// **The C original has no such word at all.** It can `PUT` and it can ask `HAS?`, and its own README
+// shows `point . x PR` reading a property, which was never written. A store with no load is not a
+// design decision, so this is the one place the port adds rather than translates.
+private w_get(vm: &Vm) -> Result[unit, Fault]
+    val (target, k) = pop2(vm, "GET")?
+    val entries = fields_of("GET", target)?
+    val key = keyed("GET", k)?
+
+    push(vm, target)
+
+    slot_for(entries, key) match
+        Some(i) -> push(vm, entries.at(i).value)
+        None -> push(vm, Undef)
+
+    Ok(())
+end w_get
+
+private w_has(vm: &Vm) -> Result[unit, Fault]
+    val (target, k) = pop2(vm, "HAS?")?
+    val entries = fields_of("HAS?", target)?
+    val key = keyed("HAS?", k)?
+
+    push(vm, target)
+
+    slot_for(entries, key) match
+        Some(_) -> push(vm, Bool(true))
+        None -> push(vm, Bool(false))
+
+    Ok(())
+end w_has
+
+// The three that answer an array built from an object, leaving the object where it was.
+private listed(vm: &Vm, name: string, wanted: int) -> Result[unit, Fault]
+    val target = pop(vm, name)?
+    val entries = fields_of(name, target)?
+
+    var out: Buf[Cell] = buf()
+
+    for i in 0..<entries.len()
+        val e = entries.at(i)
+
+        if wanted == 0
+            out.push(Text(e.key))
+        else if wanted == 1
+            out.push(e.value)
+        else
+            var pair: Buf[Cell] = buf()
+
+            pair.push(Text(e.key))
+            pair.push(e.value)
+            out.push(Arr(pair))
+
+    push(vm, target)
+    push(vm, Arr(out))
+
+    Ok(())
+end listed
+
+private w_keys(vm: &Vm) -> Result[unit, Fault] = listed(vm, "KEYS", 0)
+private w_values(vm: &Vm) -> Result[unit, Fault] = listed(vm, "VALUES", 1)
+private w_entries(vm: &Vm) -> Result[unit, Fault] = listed(vm, "ENTRIES", 2)
+
+// The inverse of `ENTRIES`: an array of two-element arrays becomes an object.
+private w_from_entries(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "FROM-ENTRIES")?
+
+    a match
+        Arr(items) ->
+            var entries: Buf[Entry] = buf()
+
+            for i in 0..<items.len()
+                items.at(i) match
+                    Arr(pair) ->
+                        if pair.len() != 2
+                            return bad("'FROM-ENTRIES' wants pairs -- one has "
+                                       + str(pair.len()) + " elements")
+
+                        val key = keyed("FROM-ENTRIES", pair.at(0))?
+
+                        slot_for(entries, key) match
+                            Some(j) -> entries.set(j, Entry(key, pair.at(1)))
+                            None -> entries.push(Entry(key, pair.at(1)))
+                    _ -> return bad("'FROM-ENTRIES' wants pairs -- one is " + kind(items.at(i)))
+
+            push(vm, Obj(entries))
+
+            Ok(())
+        _ -> bad("'FROM-ENTRIES' wants an array -- it got " + kind(a))
+end w_from_entries
+
+// --- Strings ----------------------------------------------------------------------------------
+
+private w_string_empty(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "STRING-EMPTY?")?
+
+    if !is_text(a) then return bad("'STRING-EMPTY?' wants a string -- it got " + kind(a))
+
+    push(vm, Bool(text(a).len == 0))
+
+    Ok(())
+end w_string_empty
+
+install_aggregate(vm: &Vm)
+    native(vm, "[]", w_new_array, "( -- array ) an empty array")
+    native(vm, ",", w_append, "( array a -- array ) append a")
+    native(vm, "LENGTH", w_length, "( a -- n ) elements, keys or characters")
+    native(vm, "INDEX@", w_index_fetch, "( array n -- a ) the nth element")
+    native(vm, "INDEX!", w_index_store, "( a array n -- ) put a at the nth")
+    native(vm, "{}", w_new_object, "( -- object ) an empty object")
+    native(vm, "PUT", w_put, "( object key a -- object ) put a under key")
+    native(vm, "GET", w_get, "( object key -- object a ) what is under key")
+    native(vm, "HAS?", w_has, "( object key -- object bool ) whether key is there")
+    native(vm, "KEYS", w_keys, "( object -- object array ) its keys")
+    native(vm, "VALUES", w_values, "( object -- object array ) its values")
+    native(vm, "ENTRIES", w_entries, "( object -- object array ) its key-value pairs")
+    native(vm, "FROM-ENTRIES", w_from_entries, "( array -- object ) an object from pairs")
+    native(vm, "STRING-EMPTY?", w_string_empty, "( s -- bool ) whether it has no characters")
+end install_aggregate
