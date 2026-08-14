@@ -1,0 +1,175 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+
+// The outer interpreter: read a token, and either do it or compile it.
+//
+// **This is the whole of SOLDER's grammar.** There is no parser and no tree -- a token is a number if
+// it reads as one in the current base, a word if the dictionary knows it, and a mistake otherwise. A
+// language with no syntax is one whose reader is this function, and the reason it is worth having is
+// that adding a word to the dictionary adds to the language rather than to the reader.
+run(vm: &Vm, src: string) -> Result[unit, Fault]
+    vm.src = src
+    vm.pos = 0
+
+    val bytes = src.bytes
+
+    while true
+        val (token, next) = read_token(bytes, vm.pos)?
+
+        vm.pos = next
+
+        token match
+            Eof -> return Ok(())
+            // A string literal is a value whichever mode the reader is in, so there is nothing to
+            // decide about it that is not decided about every other value.
+            Quoted(s) -> take(vm, Text(s))?
+            Name(s) -> word(vm, s)?
+
+    Ok(())
+end run
+
+// One name, as a number, as a word, or as a mistake.
+private word(vm: &Vm, name: string) -> Result[unit, Fault]
+    // **A number wins over a word of the same spelling**, which matters in base sixteen where `ABS`
+    // is both a name and a hexadecimal number. Forth resolves it the other way about; reading it as
+    // the number is what makes `HEX FF` mean 255 without a prefix, and a name that is unreachable in
+    // one base is reachable in another.
+    number(name, vm.base) match
+        Some(c) -> return take(vm, c)
+        None -> ()
+
+    find(vm, name) match
+        Some(i) ->
+            val w = vm.words.at(i)
+
+            // **An immediate word runs even while compiling**, which is how a definition gets its
+            // shape: `IF` has to plant a branch at the moment it is read, not when the definition is
+            // eventually run.
+            if vm.compiling && !w.immediate
+                vm.building.push(w.def)
+
+                Ok(())
+            else
+                execute(vm, w.def)
+        None -> bad("'" + name + "' is not a word")
+end word
+
+// A value the reader has just made: onto the stack, or into the definition being built.
+private take(vm: &Vm, c: Cell) -> Result[unit, Fault]
+    if vm.compiling
+        vm.building.push(c)
+    else
+        push(vm, c)
+
+    Ok(())
+end take
+
+// Do one cell.
+//
+// **A definition is entered rather than called.** Pushing a frame and returning to the loop is what
+// makes recursion and deep call chains cost a `Buf` entry instead of a sysl stack frame -- which is
+// the difference between a definition that recurses ten thousand deep on a board with four kilobytes
+// of stack and one that does not.
+execute(vm: &Vm, c: Cell) -> Result[unit, Fault]
+    c match
+        Native(f) -> f(vm)
+        Code(body) ->
+            vm.frames.push(Frame(body, 0))
+
+            inner(vm)
+        _ ->
+            push(vm, c)
+
+            Ok(())
+end execute
+
+// The inner interpreter: walk the frames until the outermost one runs out.
+//
+// **Running off the end of a body is the return**, so no definition carries a terminating cell. The C
+// original appends an explicit `EXIT` to every definition it compiles and then has to remember to,
+// which is one of the two places `add_definition` can leave a body that runs into whatever follows it
+// in memory.
+private inner(vm: &Vm) -> Result[unit, Fault]
+    val floor = vm.frames.len() - 1
+
+    while vm.frames.len() > floor
+        val top = vm.frames.len() - 1
+        val f = vm.frames.at(top)
+
+        if f.ip >= f.body.len()
+            vm.frames.truncate(top)
+
+            continue
+
+        val c = f.body.at(f.ip)
+
+        vm.frames.set(top, Frame(f.body, f.ip + 1))
+
+        c match
+            Branch(delta) -> jump(vm, top, delta)
+            BranchIfFalse(delta) ->
+                val cond = pop(vm, "IF")?
+
+                if !truthy(cond) then jump(vm, top, delta)
+            Code(body) -> vm.frames.push(Frame(body, 0))
+            Native(g) -> g(vm)?
+            _ -> push(vm, c)
+
+    Ok(())
+end inner
+
+// Move a frame's cursor by a signed distance from the cell after the branch.
+private jump(vm: &Vm, at: usize, delta: int)
+    val f = vm.frames.at(at)
+
+    vm.frames.set(at, Frame(f.body, usize(long(f.ip) + long(delta))))
+
+// The next token, for a word that parses ahead. `Eof` is a refusal here rather than a value, because
+// every one of them was written expecting something after it.
+next_name(vm: &Vm, word: string) -> Result[string, Fault]
+    val (token, next) = read_token(vm.src.bytes, vm.pos)?
+
+    vm.pos = next
+
+    token match
+        Name(s) -> Ok(s)
+        Quoted(s) -> Ok(s)
+        Eof -> Err(More)
+end next_name
+
+// Begin a definition. `DEF SQUARE DUP * END` -- the name comes from the text, not from the stack.
+def_word(vm: &Vm) -> Result[unit, Fault]
+    if vm.compiling then return bad("'DEF' inside a definition -- 'END' closes the one already open")
+
+    val name = next_name(vm, "DEF")?
+
+    vm.building_name = name
+    vm.building = buf()
+    vm.ctrl.clear()
+    vm.compiling = true
+
+    Ok(())
+end def_word
+
+// Close a definition and file it.
+//
+// **An unclosed control word is caught here**, where the whole shape is known, rather than at the
+// branch that has no distance. `vm.ctrl` holding anything means an `IF` or a `BEGIN` never met its
+// partner, and saying so is more use than a definition that runs and jumps somewhere arbitrary.
+end_word(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'END' with no 'DEF' open")
+
+    if !vm.ctrl.is_empty()
+        vm.compiling = false
+
+        return bad("'" + vm.building_name + "' has a control word left open")
+
+    define(vm, vm.building_name, Code(vm.building), false, "")
+
+    vm.compiling = false
+    vm.building = buf()
+    vm.building_name = ""
+
+    Ok(())
+end end_word

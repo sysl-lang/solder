@@ -1,0 +1,483 @@
+module sh.sysl.solder
+
+// Arithmetic, comparison and the bitwise words.
+//
+// **One promotion rule, written once.** `core_arithmetic.c` in the C original is 715 lines, most of
+// them the same three-way widening spelled again for each operator; here `wider` decides the width
+// and `arith` does the operation, so an operator is four lines and a new one cannot get the rule
+// subtly different from its neighbours.
+
+// Which operation, so that the widening is written once rather than once per operator.
+private enum Op
+    Add
+    Sub
+    Mul
+    Div
+    Rem
+end Op
+
+// How wide a numeric cell is: 1 for `Int`, 2 for `Long`, 3 for `Real`, and 0 for anything that is not
+// a number at all.
+private width(c: Cell) -> int
+    c match
+        Int(_) -> 1
+        Long(_) -> 2
+        Real(_) -> 3
+        _ -> 0
+end width
+
+private as_long(c: Cell) -> long
+    c match
+        Int(v) -> long(v)
+        Long(v) -> v
+        Real(v) -> long(v)
+        _ -> 0
+end as_long
+
+private as_real(c: Cell) -> f64
+    c match
+        Int(v) -> f64(v)
+        Long(v) -> f64(v)
+        Real(v) -> v
+        _ -> 0.0
+end as_real
+
+// The width two operands meet at, or a refusal naming the side that is not a number.
+//
+// **The diagnostic names which side**, because `1 "x" +` and `"x" 1 +` are different mistakes to the
+// person who typed them and a message saying only that something was not a number sends them looking
+// at both.
+private wider(name: string, a: Cell, b: Cell) -> Result[int, Fault]
+    if width(a) == 0 then return bad("'" + name + "' wants numbers -- the first is " + kind(a))
+    if width(b) == 0 then return bad("'" + name + "' wants numbers -- the second is " + kind(b))
+
+    Ok(if width(a) > width(b) then width(a) else width(b))
+end wider
+
+// Two numbers, at the width they meet at.
+private arith(name: string, op: Op, a: Cell, b: Cell) -> Result[Cell, Fault]
+    val w = wider(name, a, b)?
+
+    if w == 3
+        val x = as_real(a)
+        val y = as_real(b)
+
+        // **A float divided by zero is an infinity rather than a refusal**, which is IEEE's answer and
+        // is the one a calculation wants: a limit that runs away is information, and stopping the
+        // program to say so would make a sequence that happens to pass through zero unwritable.
+        val r = op match
+            Add -> x + y
+            Sub -> x - y
+            Mul -> x * y
+            Div -> x / y
+            Rem -> x - y * f64(long(x / y))
+
+        return Ok(Real(r))
+
+    val x = as_long(a)
+    val y = as_long(b)
+
+    op match
+        Div ->
+            if y == 0 then return bad("'" + name + "' divides by zero")
+        Rem ->
+            if y == 0 then return bad("'" + name + "' divides by zero")
+        _ -> ()
+
+    val v = op match
+        Add -> x + y
+        Sub -> x - y
+        Mul -> x * y
+        Div -> x / y
+        Rem -> x % y
+
+    // **The result narrows back to `Int` only if both operands were**, so `2 3 *` is an `Int` and
+    // `2L 3 *` is a `Long`. Narrowing on the value instead would make a width depend on the answer,
+    // and a loop that crossed 2^31 would change type underneath itself.
+    if w == 1 then Ok(Int(int(v))) else Ok(Long(v))
+end arith
+
+// Order between two cells: negative, zero or positive.
+//
+// **Numbers compare with numbers and strings with strings, and nothing else compares at all.** There
+// is no answer to whether a colour is less than an array, and inventing one -- by tag order, by size,
+// by anything -- would make `<` silently sort a list of mixed cells into an order nobody chose.
+compare(name: string, a: Cell, b: Cell) -> Result[int, Fault]
+    if is_text(a) && is_text(b)
+        val x = text(a)
+        val y = text(b)
+
+        return Ok(if x < y then -1 else if x > y then 1 else 0)
+
+    val w = wider(name, a, b)?
+
+    if w == 3
+        val x = as_real(a)
+        val y = as_real(b)
+
+        return Ok(if x < y then -1 else if x > y then 1 else 0)
+
+    val x = as_long(a)
+    val y = as_long(b)
+
+    Ok(if x < y then -1 else if x > y then 1 else 0)
+end compare
+
+// --- The words --------------------------------------------------------------------------------
+
+private binary(vm: &Vm, name: string, op: Op) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, name)?
+
+    push(vm, arith(name, op, a, b)?)
+
+    Ok(())
+end binary
+
+private w_add(vm: &Vm) -> Result[unit, Fault] = binary(vm, "+", Add)
+private w_sub(vm: &Vm) -> Result[unit, Fault] = binary(vm, "-", Sub)
+private w_mul(vm: &Vm) -> Result[unit, Fault] = binary(vm, "*", Mul)
+private w_div(vm: &Vm) -> Result[unit, Fault] = binary(vm, "/", Div)
+private w_rem(vm: &Vm) -> Result[unit, Fault] = binary(vm, "%", Rem)
+
+private w_negate(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "NEGATE")?
+
+    push(vm, arith("NEGATE", Sub, Int(0), a)?)
+
+    Ok(())
+end w_negate
+
+private w_incr(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "1+")?
+
+    push(vm, arith("1+", Add, a, Int(1))?)
+
+    Ok(())
+end w_incr
+
+private w_decr(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "1-")?
+
+    push(vm, arith("1-", Sub, a, Int(1))?)
+
+    Ok(())
+end w_decr
+
+private w_double(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "2*")?
+
+    push(vm, arith("2*", Mul, a, Int(2))?)
+
+    Ok(())
+end w_double
+
+private w_halve(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "2/")?
+
+    push(vm, arith("2/", Div, a, Int(2))?)
+
+    Ok(())
+end w_halve
+
+private w_abs(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "ABS")?
+
+    if compare("ABS", a, Int(0))? < 0
+        push(vm, arith("ABS", Sub, Int(0), a)?)
+    else
+        push(vm, a)
+
+    Ok(())
+end w_abs
+
+private w_signum(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "SIGNUM")?
+
+    push(vm, Int(compare("SIGNUM", a, Int(0))?))
+
+    Ok(())
+end w_signum
+
+private w_min(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "MIN")?
+
+    push(vm, if compare("MIN", a, b)? <= 0 then a else b)
+
+    Ok(())
+end w_min
+
+private w_max(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "MAX")?
+
+    push(vm, if compare("MAX", a, b)? >= 0 then a else b)
+
+    Ok(())
+end w_max
+
+// The quotient and the remainder, remainder first, which is Forth's order for `/MOD`.
+private w_divmod(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "/MOD")?
+
+    push(vm, arith("/MOD", Rem, a, b)?)
+    push(vm, arith("/MOD", Div, a, b)?)
+
+    Ok(())
+end w_divmod
+
+// `a b c */` is `a * b / c` with the product computed at full width before the division. That is the
+// point of the word: it is how a Forth scales an integer without losing the low bits to a division
+// that happened first.
+private w_muldiv(vm: &Vm) -> Result[unit, Fault]
+    val c = pop(vm, "*/")?
+    val (a, b) = pop2(vm, "*/")?
+    val product = arith("*/", Mul, widen(a), widen(b))?
+
+    push(vm, arith("*/", Div, product, c)?)
+
+    Ok(())
+end w_muldiv
+
+private w_muldivmod(vm: &Vm) -> Result[unit, Fault]
+    val c = pop(vm, "*/MOD")?
+    val (a, b) = pop2(vm, "*/MOD")?
+    val product = arith("*/MOD", Mul, widen(a), widen(b))?
+
+    push(vm, arith("*/MOD", Rem, product, c)?)
+    push(vm, arith("*/MOD", Div, product, c)?)
+
+    Ok(())
+end w_muldivmod
+
+// An `Int` as a `Long`, so that a product computed from two of them cannot overflow before the
+// division that was going to bring it back into range.
+private widen(c: Cell) -> Cell
+    c match
+        Int(v) -> Long(long(v))
+        _ -> c
+end widen
+
+private w_to_int(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "INT32")?
+
+    if width(a) == 0 then return bad("'INT32' wants a number -- it got " + kind(a))
+
+    push(vm, Int(int(as_long(a))))
+
+    Ok(())
+end w_to_int
+
+private w_to_long(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "INT64")?
+
+    if width(a) == 0 then return bad("'INT64' wants a number -- it got " + kind(a))
+
+    push(vm, Long(as_long(a)))
+
+    Ok(())
+end w_to_long
+
+private w_to_real(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "FLOAT")?
+
+    if width(a) == 0 then return bad("'FLOAT' wants a number -- it got " + kind(a))
+
+    push(vm, Real(as_real(a)))
+
+    Ok(())
+end w_to_real
+
+// --- Comparison -------------------------------------------------------------------------------
+
+private w_eq(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "=")?
+
+    push(vm, Bool(same(a, b)))
+
+    Ok(())
+end w_eq
+
+private w_ne(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "!=")?
+
+    push(vm, Bool(!same(a, b)))
+
+    Ok(())
+end w_ne
+
+private ordered(vm: &Vm, name: string, lt: bool, eq: bool, gt: bool) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, name)?
+    val c = compare(name, a, b)?
+
+    push(vm, Bool(if c < 0 then lt else if c > 0 then gt else eq))
+
+    Ok(())
+end ordered
+
+private w_lt(vm: &Vm) -> Result[unit, Fault] = ordered(vm, "<", true, false, false)
+private w_gt(vm: &Vm) -> Result[unit, Fault] = ordered(vm, ">", false, false, true)
+private w_le(vm: &Vm) -> Result[unit, Fault] = ordered(vm, "<=", true, true, false)
+private w_ge(vm: &Vm) -> Result[unit, Fault] = ordered(vm, ">=", false, true, true)
+
+private against_zero(vm: &Vm, name: string, lt: bool, eq: bool, gt: bool) -> Result[unit, Fault]
+    val a = pop(vm, name)?
+    val c = compare(name, a, Int(0))?
+
+    push(vm, Bool(if c < 0 then lt else if c > 0 then gt else eq))
+
+    Ok(())
+end against_zero
+
+private w_zero_eq(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0=", false, true, false)
+private w_zero_ne(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0!=", true, false, true)
+private w_zero_lt(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0<", true, false, false)
+private w_zero_gt(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0>", false, false, true)
+private w_zero_le(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0<=", true, true, false)
+private w_zero_ge(vm: &Vm) -> Result[unit, Fault] = against_zero(vm, "0>=", false, true, true)
+
+// --- Logic and bits ---------------------------------------------------------------------------
+
+// **`AND` and `OR` answer a boolean and take anything**, because what they test is truthiness -- which
+// is the same rule `IF` uses, and a language where `IF` and `AND` disagreed about what counts as true
+// would have two of them. The bitwise pair is `&` and `|`, and they take integers only.
+private w_and(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "AND")?
+
+    push(vm, Bool(truthy(a) && truthy(b)))
+
+    Ok(())
+end w_and
+
+private w_or(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "OR")?
+
+    push(vm, Bool(truthy(a) || truthy(b)))
+
+    Ok(())
+end w_or
+
+private w_not(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "NOT")?
+
+    push(vm, Bool(!truthy(a)))
+
+    Ok(())
+end w_not
+
+private w_true(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Bool(true))
+
+    Ok(())
+end w_true
+
+private w_false(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Bool(false))
+
+    Ok(())
+end w_false
+
+// An integer operand for a bitwise word, at the width it was given in.
+private bits(name: string, c: Cell) -> Result[long, Fault]
+    c match
+        Int(v) -> Ok(long(v))
+        Long(v) -> Ok(v)
+        _ -> bad("'" + name + "' works on integers -- it got " + kind(c))
+end bits
+
+private bitwise(vm: &Vm, name: string, op: Op) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, name)?
+    val x = bits(name, a)?
+    val y = bits(name, b)?
+    val v = op match
+        Add -> x & y
+        Sub -> x | y
+        Mul -> x ^ y
+        Div -> x << y
+        Rem -> x >> y
+
+    push(vm, if width(a) == 1 && width(b) == 1 then Int(int(v)) else Long(v))
+
+    Ok(())
+end bitwise
+
+private w_bit_and(vm: &Vm) -> Result[unit, Fault] = bitwise(vm, "&", Add)
+private w_bit_or(vm: &Vm) -> Result[unit, Fault] = bitwise(vm, "|", Sub)
+private w_bit_xor(vm: &Vm) -> Result[unit, Fault] = bitwise(vm, "^", Mul)
+private w_shl(vm: &Vm) -> Result[unit, Fault] = bitwise(vm, "<<", Div)
+private w_shr(vm: &Vm) -> Result[unit, Fault] = bitwise(vm, ">>", Rem)
+
+// The unsigned shift: zeroes come in at the top whatever the sign was, which is what a register wants
+// and what `>>` deliberately does not do.
+private w_ushr(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, ">>>")?
+    val x = bits(">>>", a)?
+    val y = bits(">>>", b)?
+
+    a match
+        Int(v) -> push(vm, Int(int(long(uint(v) >> u32(y)))))
+        _ -> push(vm, Long(long(ulong(x) >> u64(y))))
+
+    Ok(())
+end w_ushr
+
+private w_bit_not(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "~")?
+
+    a match
+        Int(v) -> push(vm, Int(~v))
+        Long(v) -> push(vm, Long(~v))
+        _ -> return bad("'~' works on integers -- it got " + kind(a))
+
+    Ok(())
+end w_bit_not
+
+// File every word in this file.
+install_arith(vm: &Vm)
+    native(vm, "+", w_add, "( a b -- a+b )")
+    native(vm, "-", w_sub, "( a b -- a-b )")
+    native(vm, "*", w_mul, "( a b -- a*b )")
+    native(vm, "/", w_div, "( a b -- a/b )")
+    native(vm, "%", w_rem, "( a b -- a%b )")
+    native(vm, "NEGATE", w_negate, "( a -- -a )")
+    native(vm, "1+", w_incr, "( a -- a+1 )")
+    native(vm, "1-", w_decr, "( a -- a-1 )")
+    native(vm, "2*", w_double, "( a -- a*2 )")
+    native(vm, "2/", w_halve, "( a -- a/2 )")
+    native(vm, "ABS", w_abs, "( a -- |a| )")
+    native(vm, "SIGNUM", w_signum, "( a -- -1|0|1 )")
+    native(vm, "MIN", w_min, "( a b -- the smaller )")
+    native(vm, "MAX", w_max, "( a b -- the larger )")
+    native(vm, "/MOD", w_divmod, "( a b -- a%b a/b )")
+    native(vm, "*/", w_muldiv, "( a b c -- a*b/c, at full width )")
+    native(vm, "*/MOD", w_muldivmod, "( a b c -- rem quot, at full width )")
+    native(vm, "INT32", w_to_int, "( a -- a as a 32-bit integer )")
+    native(vm, "INT64", w_to_long, "( a -- a as a 64-bit integer )")
+    native(vm, "FLOAT", w_to_real, "( a -- a as a float )")
+    native(vm, "=", w_eq, "( a b -- whether they are the same value )")
+    native(vm, "!=", w_ne, "( a b -- whether they differ )")
+    native(vm, "<", w_lt, "( a b -- a<b )")
+    native(vm, ">", w_gt, "( a b -- a>b )")
+    native(vm, "<=", w_le, "( a b -- a<=b )")
+    native(vm, ">=", w_ge, "( a b -- a>=b )")
+    native(vm, "0=", w_zero_eq, "( a -- a=0 )")
+    native(vm, "0!=", w_zero_ne, "( a -- a!=0 )")
+    native(vm, "0<", w_zero_lt, "( a -- a<0 )")
+    native(vm, "0>", w_zero_gt, "( a -- a>0 )")
+    native(vm, "0<=", w_zero_le, "( a -- a<=0 )")
+    native(vm, "0>=", w_zero_ge, "( a -- a>=0 )")
+    native(vm, "AND", w_and, "( a b -- both are true )")
+    native(vm, "OR", w_or, "( a b -- either is true )")
+    native(vm, "NOT", w_not, "( a -- a is false )")
+    native(vm, "TRUE", w_true, "( -- TRUE )")
+    native(vm, "FALSE", w_false, "( -- FALSE )")
+    native(vm, "&", w_bit_and, "( a b -- bitwise and )")
+    native(vm, "|", w_bit_or, "( a b -- bitwise or )")
+    native(vm, "^", w_bit_xor, "( a b -- bitwise xor )")
+    native(vm, "~", w_bit_not, "( a -- bitwise complement )")
+    native(vm, "<<", w_shl, "( a n -- a shifted left )")
+    native(vm, ">>", w_shr, "( a n -- a shifted right, sign kept )")
+    native(vm, ">>>", w_ushr, "( a n -- a shifted right, zeroes in )")
+end install_arith
+
+// Addition, for the words outside this file that need it: `+!` and its two shorthands, which add to
+// what a variable holds and are the only arithmetic that does not live here.
+add_cells(name: string, a: Cell, b: Cell) -> Result[Cell, Fault] = arith(name, Add, a, b)

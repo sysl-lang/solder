@@ -1,0 +1,101 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+
+// A cell as a person reads it back.
+//
+// **Integers are written in the current base and everything else is not.** `HEX FF PR` printing `FF`
+// is the whole point of having a base at all; a float, a coordinate or a colour in base sixteen would
+// be a notation nobody has agreed on, so those stay as they are.
+show(c: Cell, base: int) -> string
+    c match
+        Nul -> "null"
+        Undef -> "undefined"
+        Bool(b) -> if b then "TRUE" else "FALSE"
+        Int(v) -> radix(long(v), base)
+        Long(v) -> radix(v, base)
+        Real(v) -> str(v)
+        Text(s) -> s
+        Arr(items) -> "[" + joined(items, base) + "]"
+        Obj(entries) -> "{" + fields(entries, base) + "}"
+        Code(_) -> "<definition>"
+        Native(_) -> "<native>"
+        Var(slot) -> "<variable " + str(slot) + ">"
+        Branch(delta) -> "<branch " + str(delta) + ">"
+        BranchIfFalse(delta) -> "<branch-if-false " + str(delta) + ">"
+        Rgb(r, g, b) -> "#" + two_hex(r) + two_hex(g) + two_hex(b)
+        Stamp(seconds, tz) -> str(seconds) + "@" + str(tz)
+        Coord(lon, lat) -> str(lon) + "," + str(lat)
+        Complex(re, im) -> str(re) + (if im < 0.0f32 then "" else "+") + str(im) + "i"
+        Pair(first, second) -> str(first) + " " + str(second)
+end show
+
+// An array's elements, space separated. A nested array keeps its brackets, since inside one they are
+// the only thing saying where an element ends.
+private joined(items: &Buf[Cell], base: int) -> string
+    var out = ""
+
+    for i in 0..<items.len()
+        if i > 0 then out = out + " "
+
+        out = out + show(items.at(i), base)
+
+    out
+end joined
+
+private fields(entries: &Buf[Entry], base: int) -> string
+    var out = ""
+
+    for i in 0..<entries.len()
+        if i > 0 then out = out + " "
+
+        val e = entries.at(i)
+
+        out = out + e.key + ": " + show(e.value, base)
+
+    out
+end fields
+
+// An integer in a radix, with the sign in front.
+//
+// **Written here rather than taken from the library** because the library renders in decimal and a
+// base is the one thing a Forth is expected to be able to move: `HEX`, `BINARY` and `OCTAL` are words
+// in the vocabulary and `BASE` is a variable a program may set to anything from two to thirty-six.
+radix(v: long, base: int) -> string
+    if base < 2 || base > 36 then return str(v)
+    if v == 0 then return "0"
+
+    val digits = "0123456789abcdefghijklmnopqrstuvwxyz".bytes
+    val negative = v < 0
+    var n = if negative then v else -v
+    var out: Buf[u8] = buf()
+
+    // **Counting down from a negative rather than up from a positive**, so that the most negative
+    // `long` renders. Negating it first is the bug this avoids: there is no positive `long` to negate
+    // it to, so the value would come back unchanged and print without its sign.
+    while n != 0
+        out.push(digits[usize(-(n % long(base)))])
+        n = n / long(base)
+
+    if negative then out.push(u8('-'))
+
+    var flipped: Buf[u8] = buf()
+    var i = out.len()
+
+    while i > 0
+        i -= 1
+
+        flipped.push(out.at(i))
+
+    from_utf8_unchecked(flipped.view())
+end radix
+
+private two_hex(b: u8) -> string
+    val digits = "0123456789ABCDEF".bytes
+    var out: Buf[u8] = buf()
+
+    out.push(digits[usize(b >> 4)])
+    out.push(digits[usize(b & 0x0F)])
+
+    from_utf8_unchecked(out.view())
+end two_hex

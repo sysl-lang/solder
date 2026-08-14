@@ -49,11 +49,26 @@ struct Vm
     // terminal: a console asks for the transcript and decides where it goes, and a test reads the same
     // string a person would have seen.
     out: Buf[u8]
+    // The text `run` is reading, and how far into it the reader has got.
+    //
+    // **The cursor is interpreter state rather than a local of the reader**, because words parse
+    // ahead: `DEF` takes the name after it, `CONSTANT` takes the name after it, and `'` takes the
+    // whole of the next token without looking it up. A reader that kept the cursor to itself could
+    // not offer them any of that.
+    src: string
+    pos: usize
     // Whether the reader is compiling into `building` rather than executing.
     compiling: bool
     building: &Buf[Cell]
     // The name the definition under construction will be filed under.
     building_name: string
+    // Where the control-flow words left a hole to be patched -- the index in `building` of a `Branch`
+    // whose distance is not known until the matching word arrives.
+    //
+    // **A stack of its own rather than the data stack.** Classic Forth puts these on the data stack,
+    // which is why an unbalanced `IF` there corrupts the values a definition was working with; keeping
+    // them apart means a mismatched control word is a refusal naming the mismatch.
+    ctrl: Buf[usize]
     // The radix `BASE` currently holds, for reading and printing integers.
     base: int
 end Vm
@@ -63,7 +78,7 @@ end Vm
 // **The core words are not here**, so that this file has no dependency on the vocabulary and the
 // vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
 // consumer calls.
-bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), false, buf(), "", 10)
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, buf(), "", buf(), 10)
 
 // Everything the program has printed since the interpreter was made.
 transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())
@@ -123,10 +138,10 @@ define(vm: &Vm, name: string, def: Cell, immediate: bool, help: string)
     vm.words.push(Word(name, def, immediate, help))
 
 // File a word written in sysl.
-native(vm: &Vm, name: string, f: *extern(&Vm) -> Result[unit, Fault], help: string)
+native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
     define(vm, name, Native(f), false, help)
 
 // File a word written in sysl that runs even while the reader is compiling. `IF`, `DEF` and `END` are
 // what this is for: they are how a definition gets its shape, so they cannot wait until it is run.
-immediate_native(vm: &Vm, name: string, f: *extern(&Vm) -> Result[unit, Fault], help: string)
+immediate_native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
     define(vm, name, Native(f), true, help)

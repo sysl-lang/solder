@@ -75,7 +75,7 @@ enum Cell
     // the point -- `'` puts a definition on the stack and `EXECUTE` runs what it finds there.
     Code(body: &Buf[Cell])
     // A word written in sysl rather than in SOLDER.
-    Native(f: *extern(&Vm) -> Result[unit, Fault])
+    Native(f: &Fn(&Vm) -> Result[unit, Fault])
     // A variable's storage, named by its slot in the interpreter's table. `@` reads it and `!` writes
     // it. This is C's `CELL_POINTER` with the pointer taken out.
     Var(slot: usize)

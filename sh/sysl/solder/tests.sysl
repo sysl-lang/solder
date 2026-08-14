@@ -159,3 +159,185 @@ the_transcript_is_what_was_printed_in_the_order_it_was_printed()
     emit(vm, "two")
 
     assert_eq(transcript(vm), "one two")
+
+// --- Reading --------------------------------------------------------------------------------------
+
+// The tokens a source text reads as, spelled and joined. It pins the one thing the reader decides
+// that nothing downstream can recover: where the boundaries are, and a quoted string is shown quoted
+// so that `"a"` and `a` are told apart.
+private lexes(src: string) -> string
+    val bytes = src.bytes
+    var out = ""
+    var pos: usize = 0
+
+    while true
+        read_token(bytes, pos) match
+            Ok((token, next)) ->
+                pos = next
+
+                token match
+                    Eof -> return out
+                    Name(s) ->
+                        if out != "" then out = out + " "
+                        out = out + s
+                    Quoted(s) ->
+                        if out != "" then out = out + " "
+                        out = out + "\"" + s + "\""
+            Err(f) -> return "error: " + describe(f)
+
+    out
+end lexes
+
+@test
+words_are_runs_of_anything_that_is_not_blank() =
+    assert_eq(lexes("5 3 + .S"), "5 3 + .S")
+
+@test
+a_comment_runs_to_the_end_of_its_line() =
+    assert_eq(lexes("1 // and the rest\n2"), "1 2")
+
+@test
+a_quote_ends_a_word_and_begins_a_string() =
+    assert_eq(lexes("PR\"x\""), "PR \"x\"")
+
+@test
+escapes_in_a_string_are_the_characters_they_stand_for() =
+    assert_eq(lexes("\"a\\tb\""), "\"a\tb\"")
+
+@test
+an_unterminated_string_asks_for_more_rather_than_complaining() =
+    assert_eq(lexes("\"unfinished"), "error: the input stops in the middle of something")
+
+@test
+a_number_takes_its_width_from_its_value()
+    assert(same(number("7", 10).unwrap(), Int(7)))
+    assert(same(number("5000000000", 10).unwrap(), Long(5000000000)))
+    assert(same(number("7L", 10).unwrap(), Long(7)))
+    assert(same(number("2.5", 10).unwrap(), Real(2.5)))
+    assert(same(number("7F", 10).unwrap(), Real(7.0)))
+
+@test
+a_number_is_read_in_the_current_base()
+    assert(same(number("ff", 16).unwrap(), Int(255)))
+    assert(same(number("101", 2).unwrap(), Int(5)))
+
+@test
+a_word_that_is_not_a_number_reads_as_nothing()
+    number("DUP", 10) match
+        Some(_) -> assert(false, "DUP is not a number")
+        None -> ()
+
+// --- Running --------------------------------------------------------------------------------------
+
+// What a program printed, or the refusal it earned. Everything below is asserted through this rather
+// than through the stack, because the transcript is what a person typing sees and the stack is an
+// implementation.
+private ran(src: string) -> string
+    val vm = solder()
+
+    run(vm, src) match
+        Ok(_) -> transcript(vm)
+        Err(f) -> "error: " + describe(f)
+end ran
+
+@test
+arithmetic_is_postfix() =
+    assert_eq(ran("5 3 + PR"), "8")
+
+@test
+the_stack_words_move_cells_about()
+    assert_eq(ran("1 2 SWAP PR PR"), "12")
+    assert_eq(ran("1 2 OVER PR PR PR"), "121")
+    assert_eq(ran("1 2 3 ROT .S"), "<3> 2 3 1")
+    assert_eq(ran("1 2 3 -ROT .S"), "<3> 3 1 2")
+    assert_eq(ran("7 DUP * PR"), "49")
+
+@test
+pick_and_roll_count_from_the_top()
+    assert_eq(ran("10 20 30 2 PICK .S"), "<4> 10 20 30 10")
+    assert_eq(ran("10 20 30 2 ROLL .S"), "<3> 20 30 10")
+
+@test
+a_width_survives_the_arithmetic_that_produced_it()
+    assert_eq(ran("2 3 * PR"), "6")
+    assert_eq(ran("2L 3 * PR"), "6")
+    assert_eq(ran("2 3 / PR"), "0")
+    assert_eq(ran("2.0 4 / PR"), "0.5")
+
+@test
+dividing_an_integer_by_zero_is_refused() =
+    assert_eq(ran("1 0 / PR"), "error: '/' divides by zero")
+
+@test
+a_word_that_wants_a_number_says_which_side_was_not_one()
+    assert_eq(ran("1 \"x\" +"), "error: '+' wants numbers -- the second is a string")
+    assert_eq(ran("\"x\" 1 +"), "error: '+' wants numbers -- the first is a string")
+
+@test
+a_definition_is_a_word_like_any_other() =
+    assert_eq(ran("DEF SQUARE DUP * END 7 SQUARE PR"), "49")
+
+@test
+a_definition_may_call_another() =
+    assert_eq(ran("DEF SQUARE DUP * END DEF QUAD SQUARE SQUARE END 3 QUAD PR"), "81")
+
+@test
+exit_leaves_a_definition_early() =
+    assert_eq(ran("DEF TWO 2 PR EXIT 3 PR END TWO"), "2")
+
+@test
+a_name_nobody_has_defined_is_refused() =
+    assert_eq(ran("FROBNICATE"), "error: 'FROBNICATE' is not a word")
+
+@test
+end_without_def_is_refused() =
+    assert_eq(ran("END"), "error: 'END' with no 'DEF' open")
+
+@test
+a_constant_answers_the_value_it_was_given() =
+    assert_eq(ran("42 CONSTANT ANSWER ANSWER PR"), "42")
+
+@test
+a_variable_is_read_and_written_by_name() =
+    assert_eq(ran("VARIABLE N 5 N ! N @ PR 3 N +! N @ PR N 1+! N @ PR"), "589")
+
+@test
+storing_into_something_that_is_not_a_variable_is_refused() =
+    assert_eq(ran("1 2 !"), "error: '!' wants a variable -- it got an integer")
+
+@test
+the_base_governs_reading_and_printing()
+    assert_eq(ran("HEX FF PR"), "ff")
+    assert_eq(ran("HEX FF DECIMAL PR"), "255")
+    assert_eq(ran("BINARY 1011 DECIMAL PR"), "11")
+    assert_eq(ran("2 BASE 1011 DECIMAL PR"), "11")
+
+@test
+a_base_outside_two_to_thirty_six_is_refused() =
+    assert_eq(ran("40 BASE"), "error: 'BASE' takes 2 to 36 -- it got 40")
+
+@test
+comparison_answers_a_boolean()
+    assert_eq(ran("1 2 < PR"), "TRUE")
+    assert_eq(ran("1 2 = PR"), "FALSE")
+    assert_eq(ran("\"a\" \"b\" < PR"), "TRUE")
+    assert_eq(ran("0 0= PR"), "TRUE")
+
+@test
+a_definition_may_be_put_on_the_stack_and_run_later() =
+    assert_eq(ran("DEF SQUARE DUP * END ' SQUARE CONSTANT SQ 5 SQ EXECUTE PR"), "25")
+
+@test
+printing_a_string_prints_its_characters() =
+    assert_eq(ran("\"hello\" PR"), "hello")
+
+@test
+emit_prints_one_character() =
+    assert_eq(ran("65 EMIT 66 EMIT"), "AB")
+
+@test
+a_hex_digit_is_not_read_as_a_width_suffix()
+    assert_eq(ran("HEX FF DECIMAL PR"), "255")
+    assert_eq(ran("HEX 7F DECIMAL PR"), "127")
+    assert_eq(ran("7F PR"), "7")
+    assert_eq(ran("7L PR"), "7")

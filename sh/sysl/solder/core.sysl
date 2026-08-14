@@ -1,0 +1,421 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+
+// The stack, the dictionary and the words that print -- and `solder()`, which is what a consumer
+// calls.
+
+// --- The stack --------------------------------------------------------------------------------
+
+private w_dup(vm: &Vm) -> Result[unit, Fault]
+    push(vm, peek(vm, "DUP")?)
+
+    Ok(())
+end w_dup
+
+private w_drop(vm: &Vm) -> Result[unit, Fault]
+    pop(vm, "DROP")?
+
+    Ok(())
+end w_drop
+
+private w_swap(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "SWAP")?
+
+    push(vm, b)
+    push(vm, a)
+
+    Ok(())
+end w_swap
+
+private w_over(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "OVER")?
+
+    push(vm, a)
+    push(vm, b)
+    push(vm, a)
+
+    Ok(())
+end w_over
+
+private w_two_dup(vm: &Vm) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, "2DUP")?
+
+    push(vm, a)
+    push(vm, b)
+    push(vm, a)
+    push(vm, b)
+
+    Ok(())
+end w_two_dup
+
+private w_rot(vm: &Vm) -> Result[unit, Fault]
+    val c = pop(vm, "ROT")?
+    val (a, b) = pop2(vm, "ROT")?
+
+    push(vm, b)
+    push(vm, c)
+    push(vm, a)
+
+    Ok(())
+end w_rot
+
+private w_unrot(vm: &Vm) -> Result[unit, Fault]
+    val c = pop(vm, "-ROT")?
+    val (a, b) = pop2(vm, "-ROT")?
+
+    push(vm, c)
+    push(vm, a)
+    push(vm, b)
+
+    Ok(())
+end w_unrot
+
+// Duplicate the top only if it is true, which is how a Forth tests a value it may want to keep
+// without writing the test twice.
+private w_maybe_dup(vm: &Vm) -> Result[unit, Fault]
+    val a = peek(vm, "?DUP")?
+
+    if truthy(a) then push(vm, a)
+
+    Ok(())
+end w_maybe_dup
+
+// How deep the stack was, as a cell on top of it. Counted before the push, so `DEPTH` on an empty
+// stack is `0`.
+private w_depth(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Int(int(depth(vm))))
+
+    Ok(())
+end w_depth
+
+// A depth for `PICK` or `ROLL`, checked against the stack that is left after it has been taken.
+private index(vm: &Vm, name: string) -> Result[usize, Fault]
+    val n = pop(vm, name)?
+
+    n match
+        Int(v) ->
+            if v < 0 || usize(v) >= depth(vm)
+                bad("'" + name + "' asked for " + str(v) + " of a stack " + str(depth(vm)) + " deep")
+            else
+                Ok(usize(v))
+        _ -> bad("'" + name + "' wants a count -- it got " + kind(n))
+end index
+
+// `n PICK` copies the nth cell down, counting the top as zero.
+private w_pick(vm: &Vm) -> Result[unit, Fault]
+    val n = index(vm, "PICK")?
+
+    push(vm, vm.data.at(depth(vm) - 1 - n))
+
+    Ok(())
+end w_pick
+
+// `n ROLL` moves the nth cell down to the top, closing the gap it leaves.
+private w_roll(vm: &Vm) -> Result[unit, Fault]
+    val n = index(vm, "ROLL")?
+
+    push(vm, vm.data.remove(depth(vm) - 1 - n))
+
+    Ok(())
+end w_roll
+
+// --- Printing ---------------------------------------------------------------------------------
+
+private w_print(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "PR")?
+
+    emit(vm, show(a, vm.base))
+
+    Ok(())
+end w_print
+
+private w_newline(vm: &Vm) -> Result[unit, Fault]
+    emit(vm, "\n")
+
+    Ok(())
+end w_newline
+
+private w_space(vm: &Vm) -> Result[unit, Fault]
+    emit(vm, " ")
+
+    Ok(())
+end w_space
+
+// One character, from its code point.
+private w_emit(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "EMIT")?
+
+    a match
+        Int(v) -> emit(vm, string(char(u32(v))))
+        Long(v) -> emit(vm, string(char(u32(v))))
+        Text(s) -> emit(vm, s)
+        _ -> return bad("'EMIT' wants a character code -- it got " + kind(a))
+
+    Ok(())
+end w_emit
+
+// The stack as it stands, deepest first, without disturbing it. The one word a person types when
+// they have lost track.
+private w_show_stack(vm: &Vm) -> Result[unit, Fault]
+    emit(vm, "<" + str(depth(vm)) + ">")
+
+    for i in 0..<depth(vm)
+        emit(vm, " " + show(vm.data.at(i), vm.base))
+
+    Ok(())
+end w_show_stack
+
+private w_words(vm: &Vm) -> Result[unit, Fault]
+    for i in 0..<vm.words.len()
+        if i > 0 then emit(vm, " ")
+
+        emit(vm, vm.words.at(i).name)
+
+    Ok(())
+end w_words
+
+private w_help(vm: &Vm) -> Result[unit, Fault]
+    val name = next_name(vm, "HELP")?
+
+    find(vm, name) match
+        Some(i) ->
+            val w = vm.words.at(i)
+
+            emit(vm, w.name + "  " + w.help)
+
+            Ok(())
+        None -> bad("'" + name + "' is not a word")
+end w_help
+
+// --- Values without a payload -------------------------------------------------------------------
+
+private w_null(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Nul)
+
+    Ok(())
+end w_null
+
+private w_undefined(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "UNDEFINED?")?
+
+    a match
+        Undef -> push(vm, Bool(true))
+        _ -> push(vm, Bool(false))
+
+    Ok(())
+end w_undefined
+
+// --- Definitions ------------------------------------------------------------------------------
+
+private w_def(vm: &Vm) -> Result[unit, Fault] = def_word(vm)
+private w_end(vm: &Vm) -> Result[unit, Fault] = end_word(vm)
+
+// Return from the definition now.
+//
+// **`EXIT` pops a frame rather than jumping to the end**, so a definition that leaves early leaves
+// exactly as one that runs out does, and there is nothing for a control word to have to skip over.
+private w_exit(vm: &Vm) -> Result[unit, Fault]
+    if vm.frames.is_empty() then return bad("'EXIT' outside a definition")
+
+    vm.frames.truncate(vm.frames.len() - 1)
+
+    Ok(())
+end w_exit
+
+// The definition a name stands for, without running it. `' SQUARE EXECUTE` is `SQUARE`.
+//
+// **It reads the name from the text rather than the stack**, which is why it is a word and not a
+// syntax: there is nowhere else a name could come from in a language whose values are all cells.
+private w_tick(vm: &Vm) -> Result[unit, Fault]
+    val name = next_name(vm, "'")?
+
+    find(vm, name) match
+        Some(i) ->
+            push(vm, vm.words.at(i).def)
+
+            Ok(())
+        None -> bad("'" + name + "' is not a word")
+end w_tick
+
+// The compiling twin of `'`: it plants the definition in the body being built, so that a definition
+// can name a word without running it.
+private w_bracket_tick(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'[']' is for inside a definition -- ''' is the one to type")
+
+    val name = next_name(vm, "[']")?
+
+    find(vm, name) match
+        Some(i) ->
+            vm.building.push(vm.words.at(i).def)
+
+            Ok(())
+        None -> bad("'" + name + "' is not a word")
+end w_bracket_tick
+
+private w_execute(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "EXECUTE")?
+
+    execute(vm, a)
+end w_execute
+
+// --- Constants and variables --------------------------------------------------------------------
+
+private w_constant(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "CONSTANT")?
+    val name = next_name(vm, "CONSTANT")?
+
+    define(vm, name, a, false, "( -- the value it was defined with )")
+
+    Ok(())
+end w_constant
+
+// `VARIABLE X` files a word that pushes a slot, not a value. `X @` reads it and `1 X !` writes it.
+private w_variable(vm: &Vm) -> Result[unit, Fault]
+    val name = next_name(vm, "VARIABLE")?
+    val slot = vm.vars.len()
+
+    vm.vars.push(Nul)
+    define(vm, name, Var(slot), false, "( -- the variable )")
+
+    Ok(())
+end w_variable
+
+private slot_of(vm: &Vm, name: string, c: Cell) -> Result[usize, Fault]
+    c match
+        Var(slot) -> Ok(slot)
+        _ -> bad("'" + name + "' wants a variable -- it got " + kind(c))
+end slot_of
+
+private w_fetch(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "@")?
+    val slot = slot_of(vm, "@", a)?
+
+    push(vm, vm.vars.at(slot))
+
+    Ok(())
+end w_fetch
+
+private w_store(vm: &Vm) -> Result[unit, Fault]
+    val (value, target) = pop2(vm, "!")?
+    val slot = slot_of(vm, "!", target)?
+
+    vm.vars.set(slot, value)
+
+    Ok(())
+end w_store
+
+private w_add_store(vm: &Vm) -> Result[unit, Fault]
+    val (amount, target) = pop2(vm, "+!")?
+    val slot = slot_of(vm, "+!", target)?
+
+    vm.vars.set(slot, add_cells("+!", vm.vars.at(slot), amount)?)
+
+    Ok(())
+end w_add_store
+
+private w_incr_store(vm: &Vm) -> Result[unit, Fault]
+    val target = pop(vm, "1+!")?
+    val slot = slot_of(vm, "1+!", target)?
+
+    vm.vars.set(slot, add_cells("1+!", vm.vars.at(slot), Int(1))?)
+
+    Ok(())
+end w_incr_store
+
+private w_decr_store(vm: &Vm) -> Result[unit, Fault]
+    val target = pop(vm, "1-!")?
+    val slot = slot_of(vm, "1-!", target)?
+
+    vm.vars.set(slot, add_cells("1-!", vm.vars.at(slot), Int(-1))?)
+
+    Ok(())
+end w_decr_store
+
+// --- The base ---------------------------------------------------------------------------------
+
+private set_base(vm: &Vm, n: int) -> Result[unit, Fault]
+    vm.base = n
+
+    Ok(())
+end set_base
+
+private w_decimal(vm: &Vm) -> Result[unit, Fault] = set_base(vm, 10)
+private w_hex(vm: &Vm) -> Result[unit, Fault] = set_base(vm, 16)
+private w_binary(vm: &Vm) -> Result[unit, Fault] = set_base(vm, 2)
+private w_octal(vm: &Vm) -> Result[unit, Fault] = set_base(vm, 8)
+
+// `n BASE` sets the radix to anything from two to thirty-six.
+//
+// **A word rather than the variable Forth has**, because `BASE` as a variable is a slot the reader
+// has to consult on every token it tries to read as a number, and a word that validates its argument
+// once says what happened at the point somebody typed it.
+private w_base(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "BASE")?
+
+    a match
+        Int(v) ->
+            if v < 2 || v > 36 then return bad("'BASE' takes 2 to 36 -- it got " + str(v))
+
+            vm.base = v
+        _ -> return bad("'BASE' wants a number -- it got " + kind(a))
+
+    Ok(())
+end w_base
+
+// --- The interpreter a consumer gets -------------------------------------------------------------
+
+// An interpreter with the whole vocabulary in it.
+//
+// **The words are added rather than built in**, which is what makes the dictionary a thing a program
+// may add to: a board's own words -- a pin, a register, a display -- are filed exactly as these are,
+// and a program that files none still gets a language.
+solder() -> &Vm
+    val vm = bare_vm()
+
+    install_core(vm)
+    install_arith(vm)
+
+    vm
+end solder
+
+private install_core(vm: &Vm)
+    native(vm, "DUP", w_dup, "( a -- a a )")
+    native(vm, "DROP", w_drop, "( a -- )")
+    native(vm, "SWAP", w_swap, "( a b -- b a )")
+    native(vm, "OVER", w_over, "( a b -- a b a )")
+    native(vm, "2DUP", w_two_dup, "( a b -- a b a b )")
+    native(vm, "ROT", w_rot, "( a b c -- b c a )")
+    native(vm, "-ROT", w_unrot, "( a b c -- c a b )")
+    native(vm, "?DUP", w_maybe_dup, "( a -- a a, or a if it is false )")
+    native(vm, "DEPTH", w_depth, "( -- how many cells are on the stack )")
+    native(vm, "PICK", w_pick, "( n -- a copy of the nth cell down )")
+    native(vm, "ROLL", w_roll, "( n -- the nth cell down, moved to the top )")
+    native(vm, "PR", w_print, "( a -- ) print it")
+    native(vm, "CR", w_newline, "( -- ) start a new line")
+    native(vm, "SPACE", w_space, "( -- ) print one space")
+    native(vm, "EMIT", w_emit, "( n -- ) print the character with that code")
+    native(vm, ".S", w_show_stack, "( -- ) print the stack without disturbing it")
+    native(vm, "WORDS", w_words, "( -- ) print every word in the dictionary")
+    native(vm, "HELP", w_help, "( -- ) print what the word named after it does")
+    native(vm, "NULL", w_null, "( -- null )")
+    native(vm, "UNDEFINED?", w_undefined, "( a -- whether it is undefined )")
+    immediate_native(vm, "DEF", w_def, "( -- ) begin a definition, named by what follows")
+    immediate_native(vm, "END", w_end, "( -- ) close the definition and file it")
+    native(vm, "EXIT", w_exit, "( -- ) return from the definition now")
+    native(vm, "'", w_tick, "( -- the definition named after it )")
+    immediate_native(vm, "[']", w_bracket_tick, "( -- ) plant the named definition in the body")
+    native(vm, "EXECUTE", w_execute, "( d -- ) run the definition on the stack")
+    native(vm, "CONSTANT", w_constant, "( a -- ) file a word answering a, named by what follows")
+    native(vm, "VARIABLE", w_variable, "( -- ) file a variable, named by what follows")
+    native(vm, "@", w_fetch, "( v -- what it holds )")
+    native(vm, "!", w_store, "( a v -- ) put a in it")
+    native(vm, "+!", w_add_store, "( a v -- ) add a to it")
+    native(vm, "1+!", w_incr_store, "( v -- ) add one to it")
+    native(vm, "1-!", w_decr_store, "( v -- ) take one from it")
+    native(vm, "DECIMAL", w_decimal, "( -- ) read and print integers in base ten")
+    native(vm, "HEX", w_hex, "( -- ) base sixteen")
+    native(vm, "BINARY", w_binary, "( -- ) base two")
+    native(vm, "OCTAL", w_octal, "( -- ) base eight")
+    native(vm, "BASE", w_base, "( n -- ) read and print integers in base n")
+end install_core
