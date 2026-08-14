@@ -180,3 +180,16 @@ native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
 // what this is for: they are how a definition gets its shape, so they cannot wait until it is run.
 immediate_native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
     define(vm, name, Native(f), true, help)
+
+// Everything printed since the last time this was asked, and nothing afterwards.
+//
+// **A console drains rather than reads**, because it prints what it takes and asking twice would
+// print it twice. `transcript` is the other half of the pair and is what a test wants: it reads the
+// whole session and leaves it alone.
+drain(vm: &Vm) -> string
+    val out = transcript(vm)
+
+    vm.out.clear()
+
+    out
+end drain

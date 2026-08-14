@@ -471,3 +471,102 @@ strings_join_with_the_same_sign_numbers_add_with()
 @test
 two_arrays_with_the_same_elements_are_equal() =
     assert_eq(ran("[] 1 , 2 , [] 1 , 2 , = PR"), "TRUE")
+
+// --- The floating-point words ---------------------------------------------------------------------
+
+@test
+a_float_word_answers_a_float_whatever_it_was_given()
+    assert_eq(ran("4 SQRT PR"), "2")
+    assert_eq(ran("2.25 SQRT PR"), "1.5")
+    assert_eq(ran("2 10 ** PR"), "1024")
+
+@test
+the_roundings_differ_from_each_other()
+    assert_eq(ran("2.7 FLOOR PR"), "2")
+    assert_eq(ran("2.2 CEIL PR"), "3")
+    assert_eq(ran("2.5 ROUND PR"), "3")
+    assert_eq(ran("-2.7 TRUNC PR"), "-2")
+
+@test
+the_constants_are_there() =
+    assert_eq(ran("PI 2 * PI 2 * = PR"), "TRUE")
+
+@test
+a_float_word_given_something_that_is_not_a_number_is_refused() =
+    assert_eq(ran("\"x\" SQRT"), "error: 'SQRT' wants a number -- it got a string")
+
+// --- A session ------------------------------------------------------------------------------------
+
+@test
+a_definition_may_be_typed_over_several_lines()
+    val vm = solder()
+
+    run(vm, "DEF SQUARE").unwrap()
+
+    assert(pending(vm))
+
+    run(vm, "DUP *").unwrap()
+
+    assert(pending(vm))
+
+    run(vm, "END").unwrap()
+
+    assert(!pending(vm))
+
+    run(vm, "6 SQUARE PR").unwrap()
+
+    assert_eq(transcript(vm), "36")
+
+@test
+what_a_session_defined_is_there_for_the_next_line()
+    val vm = solder()
+
+    run(vm, "DEF TWICE 2 * END").unwrap()
+    run(vm, "5 TWICE PR").unwrap()
+    run(vm, "7 TWICE PR").unwrap()
+
+    assert_eq(transcript(vm), "1014")
+
+@test
+draining_the_transcript_leaves_nothing_behind()
+    val vm = solder()
+
+    run(vm, "\"a\" PR").unwrap()
+
+    assert_eq(drain(vm), "a")
+    assert_eq(drain(vm), "")
+
+    run(vm, "\"b\" PR").unwrap()
+
+    assert_eq(drain(vm), "b")
+
+@test
+a_reset_abandons_a_half_built_definition_and_keeps_the_dictionary()
+    val vm = solder()
+
+    run(vm, "DEF TWICE 2 * END").unwrap()
+    run(vm, "1 2 3 DEF BROKEN IF").unwrap()
+
+    assert(pending(vm))
+
+    reset(vm)
+
+    assert(!pending(vm))
+    assert_eq(depth(vm), 0)
+
+    run(vm, "5 TWICE PR").unwrap()
+
+    assert_eq(transcript(vm), "10")
+
+@test
+a_refusal_leaves_the_next_line_workable()
+    val vm = solder()
+
+    run(vm, "1 0 /") match
+        Ok(_) -> assert(false, "dividing by zero should refuse")
+        Err(f) -> assert_eq(describe(f), "'/' divides by zero")
+
+    reset(vm)
+    run(vm, "2 3 + PR").unwrap()
+
+    assert_eq(transcript(vm), "5")

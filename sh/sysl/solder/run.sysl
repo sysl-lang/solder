@@ -173,3 +173,25 @@ end_word(vm: &Vm) -> Result[unit, Fault]
 
     Ok(())
 end end_word
+
+// Whether the interpreter is in the middle of a definition and wants the rest of it.
+//
+// **This is what lets a definition span several lines**, since `vm.compiling` and the body being
+// built survive a call to `run`: a console types `DEF SQUARE`, gets nothing back, types `DUP * END`,
+// and the word is filed. A console asks this to decide between a prompt and a continuation prompt,
+// exactly as it asks for `More` on an unterminated string.
+pending(vm: &Vm) -> bool = vm.compiling
+
+// Abandon whatever was half-built and clear the stacks -- what a console does after a refusal.
+//
+// **The dictionary is deliberately untouched.** A mistake in the tenth definition of a session is no
+// reason to lose the nine before it, and a person who wants them gone makes a fresh interpreter.
+reset(vm: &Vm)
+    vm.compiling = false
+    vm.building = buf()
+    vm.building_name = ""
+
+    vm.ctrl.clear()
+    vm.data.clear()
+    vm.frames.clear()
+    vm.loops.clear()

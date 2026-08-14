@@ -1,0 +1,88 @@
+module sh.sysl.solder
+
+import sysl.math.{Float, pi, e}
+
+// The floating-point words.
+//
+// **Every one of them answers a float whatever it was given**, which is the rule a calculator has and
+// the one that makes `2 SQRT` a number rather than a refusal. That is the C original's behaviour too,
+// and it is the only place in SOLDER where a width is not preserved -- there is no integer square
+// root to preserve it to.
+
+// The operand as a float, or a refusal naming what arrived instead.
+private wanted(name: string, c: Cell) -> Result[f64, Fault]
+    c match
+        Int(v) -> Ok(f64(v))
+        Long(v) -> Ok(f64(v))
+        Real(v) -> Ok(v)
+        _ -> bad("'" + name + "' wants a number -- it got " + kind(c))
+end wanted
+
+private one(vm: &Vm, name: string, f: f64 -> f64) -> Result[unit, Fault]
+    val a = pop(vm, name)?
+
+    push(vm, Real(f(wanted(name, a)?)))
+
+    Ok(())
+end one
+
+private two(vm: &Vm, name: string, f: (f64, f64) -> f64) -> Result[unit, Fault]
+    val (a, b) = pop2(vm, name)?
+
+    push(vm, Real(f(wanted(name, a)?, wanted(name, b)?)))
+
+    Ok(())
+end two
+
+private w_sin(vm: &Vm) -> Result[unit, Fault] = one(vm, "SIN", x -> x.sin())
+private w_cos(vm: &Vm) -> Result[unit, Fault] = one(vm, "COS", x -> x.cos())
+private w_tan(vm: &Vm) -> Result[unit, Fault] = one(vm, "TAN", x -> x.tan())
+private w_asin(vm: &Vm) -> Result[unit, Fault] = one(vm, "ASIN", x -> x.asin())
+private w_acos(vm: &Vm) -> Result[unit, Fault] = one(vm, "ACOS", x -> x.acos())
+private w_atan(vm: &Vm) -> Result[unit, Fault] = one(vm, "ATAN", x -> x.atan())
+private w_exp(vm: &Vm) -> Result[unit, Fault] = one(vm, "EXP", x -> x.exp())
+private w_ln(vm: &Vm) -> Result[unit, Fault] = one(vm, "LN", x -> x.ln())
+private w_log10(vm: &Vm) -> Result[unit, Fault] = one(vm, "LOG10", x -> x.log10())
+private w_sqrt(vm: &Vm) -> Result[unit, Fault] = one(vm, "SQRT", x -> x.sqrt())
+private w_floor(vm: &Vm) -> Result[unit, Fault] = one(vm, "FLOOR", x -> x.floor())
+private w_ceil(vm: &Vm) -> Result[unit, Fault] = one(vm, "CEIL", x -> x.ceil())
+private w_round(vm: &Vm) -> Result[unit, Fault] = one(vm, "ROUND", x -> x.round())
+private w_trunc(vm: &Vm) -> Result[unit, Fault] = one(vm, "TRUNC", x -> x.trunc())
+
+private w_atan2(vm: &Vm) -> Result[unit, Fault] = two(vm, "ATAN2", (y, x) -> y.atan2(x))
+private w_pow(vm: &Vm) -> Result[unit, Fault] = two(vm, "**", (x, n) -> x.pow(n))
+private w_fmod(vm: &Vm) -> Result[unit, Fault] = two(vm, "FMOD", (x, y) -> x.fmod(y))
+
+private w_pi(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Real(pi))
+
+    Ok(())
+end w_pi
+
+private w_e(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Real(e))
+
+    Ok(())
+end w_e
+
+install_maths(vm: &Vm)
+    native(vm, "SIN", w_sin, "( x -- sin x )")
+    native(vm, "COS", w_cos, "( x -- cos x )")
+    native(vm, "TAN", w_tan, "( x -- tan x )")
+    native(vm, "ASIN", w_asin, "( x -- arcsin x )")
+    native(vm, "ACOS", w_acos, "( x -- arccos x )")
+    native(vm, "ATAN", w_atan, "( x -- arctan x )")
+    native(vm, "ATAN2", w_atan2, "( y x -- the angle to the point )")
+    native(vm, "EXP", w_exp, "( x -- e to the x )")
+    native(vm, "LN", w_ln, "( x -- natural log )")
+    native(vm, "LOG10", w_log10, "( x -- log base ten )")
+    native(vm, "**", w_pow, "( x n -- x to the n )")
+    native(vm, "SQRT", w_sqrt, "( x -- square root )")
+    native(vm, "FLOOR", w_floor, "( x -- towards minus infinity )")
+    native(vm, "CEIL", w_ceil, "( x -- towards plus infinity )")
+    native(vm, "ROUND", w_round, "( x -- to the nearest, halves away from zero )")
+    native(vm, "TRUNC", w_trunc, "( x -- towards zero )")
+    native(vm, "FMOD", w_fmod, "( x y -- the float remainder )")
+    native(vm, "PI", w_pi, "( -- 3.141592653589793 )")
+    native(vm, "E", w_e, "( -- 2.718281828459045 )")
+end install_maths
