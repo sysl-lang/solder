@@ -63,7 +63,8 @@ Where the port does something the original does not, it is written down at the p
 There are four so far: `HEX FF` is two hundred and fifty-five rather than the float fifteen (`F` is a
 digit in base sixteen, and the original tests for a width suffix before it tries the base); `GET`
 exists, the original having a `PUT` and no way to read a key back; `+` joins two strings; and a
-control word that closes the wrong thing is refused by name.
+control word that closes the wrong thing is refused by name rather than patching a cell that was
+never a branch.
 
 ## Vocabulary
 
@@ -80,6 +81,11 @@ control word that closes the wrong thing is refused by name.
 | printing and the base | `PR` `CR` `SPACE` `EMIT` `WORDS` `HELP` `DECIMAL` `HEX` `BINARY` `OCTAL` `BASE` |
 | values | `NULL` `UNDEFINED?` `STRING-EMPTY?` |
 
+**A control structure may be typed at the prompt.** An opening word with no `DEF` around it builds an
+anonymous definition, which runs the moment its structure closes and is never filed — so
+`5 0 DO I PR LOOP` is a thing to type rather than a thing to define first. It may be typed over
+several lines, exactly as a named definition may, and `pending(vm)` is true while either is waiting.
+
 A number takes its width from its value — an integer that fits in 32 bits is one, and one that does
 not is a 64-bit integer — and `L` or `F` after it says which was meant where that matters. Arithmetic
 narrows back only if both operands were narrow, so a loop that crosses 2³¹ does not change type
@@ -89,7 +95,7 @@ underneath itself.
 
 ```
 dependencies {
-  solder { git = "github.com/sysl-lang/solder", version = "0.1.0" }
+  solder { git = "github.com/sysl-lang/solder", version = "0.2.0" }
 }
 ```
 
@@ -119,14 +125,20 @@ it, so the capability costs nothing that is not already spent.
 sysl test .
 ```
 
-Eighty-two of them, and nearly all are asserted through the transcript — what a person typing would
+Ninety of them, and nearly all are asserted through the transcript — what a person typing would
 see — rather than through the stack, because the transcript is what is promised.
+
+## The console
+
+[**solder-host**](https://github.com/sysl-lang/solder-host) is SOLDER at a terminal. The
+read-run-print loop is `session`, in this package, because there is going to be more than one console
+and a loop written out per platform is copies that drift: a console names its streams and prints its
+banner, and that is all it does.
 
 ## Status
 
-The language runs. It compiles for `thumb-freestanding` as well as the host, though nothing has been
-linked for a board yet and the floating-point words will want a libm there. A console that drives it
-over a serial line is a separate repository, not written.
+The language runs, and is tagged `v0.2.0`. It compiles for `thumb-freestanding` as well as the host,
+though nothing has been linked for a board yet and the floating-point words will want a libm there.
 
 ## Licence
 
