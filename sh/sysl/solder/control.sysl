@@ -1,0 +1,347 @@
+module sh.sysl.solder
+
+// The control words.
+//
+// **Every one of them is immediate and every one of them only compiles**, which is what makes control
+// flow a vocabulary rather than syntax: `IF` plants a branch with no distance in it and `THEN` fills
+// the distance in, so the reader that meets them knows nothing about either.
+//
+// **They are refused outside a definition**, and that is a choice rather than an accident of the
+// implementation. A branch is a distance inside a body, and at the keyboard there is no body -- Forth
+// answers this by having the interpreter build an anonymous one, which means a mistyped `IF` at a
+// prompt silently swallows the rest of the line.
+
+// Where the next cell will go.
+private here(vm: &Vm) -> usize = vm.building.len()
+
+// Plant a branch with no distance yet, and answer where it went.
+private hole(vm: &Vm, cell: Cell) -> usize
+    val at = here(vm)
+
+    vm.building.push(cell)
+
+    at
+end hole
+
+// Fill in a hole so that the branch at `at` lands on the cell about to be written.
+//
+// **The distance is measured from the cell *after* the branch**, because that is where the inner
+// interpreter's cursor is by the time the branch runs. Measuring from the branch itself is the
+// off-by-one this function exists to have exactly once.
+private patch(vm: &Vm, at: usize)
+    val delta = int(long(here(vm)) - long(at) - 1)
+
+    vm.building.at(at) match
+        Branch(_) -> vm.building.set(at, Branch(delta))
+        BranchIfFalse(_) -> vm.building.set(at, BranchIfFalse(delta))
+        _ -> ()
+
+// A branch backwards to `target`, written where the cursor is now.
+private jump_back(vm: &Vm, target: usize, conditional: bool)
+    val at = here(vm)
+    val delta = int(long(target) - long(at) - 1)
+
+    vm.building.push(if conditional then BranchIfFalse(delta) else Branch(delta))
+
+// The mark a closing word expects, or a refusal saying what it found instead.
+private take_mark(vm: &Vm, name: string, wanted: MarkKind) -> Result[Mark, Fault]
+    if !vm.compiling then return bad("'" + name + "' is for inside a definition")
+
+    vm.ctrl.pop() match
+        Some(m) ->
+            if matches(m.kind, wanted) then Ok(m) else bad("'" + name + "' closes " + opened(m.kind))
+        None -> bad("'" + name + "' has nothing open before it")
+end take_mark
+
+private matches(a: MarkKind, b: MarkKind) -> bool
+    rank(a) == rank(b)
+
+private rank(k: MarkKind) -> int
+    k match
+        IfMark -> 1
+        ElseMark -> 2
+        BeginMark -> 3
+        WhileMark -> 4
+        DoMark -> 5
+        CaseMark -> 6
+        EndofMark -> 7
+end rank
+
+// What a mark says is open, for the refusal above.
+private opened(k: MarkKind) -> string
+    k match
+        IfMark -> "an 'IF'"
+        ElseMark -> "an 'ELSE'"
+        BeginMark -> "a 'BEGIN'"
+        WhileMark -> "a 'WHILE'"
+        DoMark -> "a 'DO'"
+        CaseMark -> "a 'CASE'"
+        EndofMark -> "an 'ENDOF'"
+end opened
+
+private opening(vm: &Vm, name: string, kind: MarkKind, at: usize) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'" + name + "' is for inside a definition")
+
+    vm.ctrl.push(Mark(kind, at))
+
+    Ok(())
+end opening
+
+// --- IF ELSE THEN -----------------------------------------------------------------------------
+
+private w_if(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'IF' is for inside a definition")
+
+    opening(vm, "IF", IfMark, hole(vm, BranchIfFalse(0)))
+end w_if
+
+// **`ELSE` closes the `IF` and opens itself**, which is why one word can stand where two structures
+// meet: the branch it plants jumps over the else-part, and the `IF`'s branch is patched to land just
+// after it.
+private w_else(vm: &Vm) -> Result[unit, Fault]
+    val m = take_mark(vm, "ELSE", IfMark)?
+    val at = hole(vm, Branch(0))
+
+    patch(vm, m.at)
+    vm.ctrl.push(Mark(ElseMark, at))
+
+    Ok(())
+end w_else
+
+private w_then(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'THEN' is for inside a definition")
+
+    vm.ctrl.pop() match
+        Some(m) ->
+            m.kind match
+                IfMark -> ()
+                ElseMark -> ()
+                _ -> return bad("'THEN' closes " + opened(m.kind))
+
+            patch(vm, m.at)
+
+            Ok(())
+        None -> bad("'THEN' has nothing open before it")
+end w_then
+
+// --- BEGIN AGAIN UNTIL WHILE REPEAT -------------------------------------------------------------
+
+private w_begin(vm: &Vm) -> Result[unit, Fault] = opening(vm, "BEGIN", BeginMark, here(vm))
+
+private w_again(vm: &Vm) -> Result[unit, Fault]
+    val m = take_mark(vm, "AGAIN", BeginMark)?
+
+    jump_back(vm, m.at, false)
+
+    Ok(())
+end w_again
+
+// Loop back while the top of the stack is false, which is the sense the word's name has: `UNTIL` runs
+// the body again *until* the condition holds.
+private w_until(vm: &Vm) -> Result[unit, Fault]
+    val m = take_mark(vm, "UNTIL", BeginMark)?
+
+    jump_back(vm, m.at, true)
+
+    Ok(())
+end w_until
+
+private w_while(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'WHILE' is for inside a definition")
+
+    if vm.ctrl.is_empty() then return bad("'WHILE' has no 'BEGIN' before it")
+
+    opening(vm, "WHILE", WhileMark, hole(vm, BranchIfFalse(0)))
+end w_while
+
+private w_repeat(vm: &Vm) -> Result[unit, Fault]
+    val w = take_mark(vm, "REPEAT", WhileMark)?
+    val b = take_mark(vm, "REPEAT", BeginMark)?
+
+    jump_back(vm, b.at, false)
+    patch(vm, w.at)
+
+    Ok(())
+end w_repeat
+
+// --- DO LOOP +LOOP I J UNLOOP -------------------------------------------------------------------
+
+// `limit start DO` -- the counter begins at `start` and the loop ends when it reaches `limit`.
+private do_start(vm: &Vm) -> Result[unit, Fault]
+    val (limit, start) = pop2(vm, "DO")?
+
+    vm.loops.push(Count(counter("DO", start)?, counter("DO", limit)?))
+
+    Ok(())
+end do_start
+
+private counter(name: string, c: Cell) -> Result[long, Fault]
+    c match
+        Int(v) -> Ok(long(v))
+        Long(v) -> Ok(v)
+        _ -> bad("'" + name + "' wants integers -- it got " + kind(c))
+end counter
+
+// Step the innermost counter and say whether the loop is finished.
+//
+// **A negative step finishes by going *below* the limit**, which is what makes `-1 +LOOP` count down
+// rather than run forever. Testing only `index >= limit` is the bug that shape has in every Forth
+// that forgets it.
+private step(vm: &Vm, by: long) -> Result[bool, Fault]
+    if vm.loops.is_empty() then return bad("'LOOP' outside a 'DO'")
+
+    val top = vm.loops.len() - 1
+    val c = vm.loops.at(top)
+    val next = c.index + by
+    val done = if by >= 0 then next >= c.limit else next < c.limit
+
+    if done then vm.loops.truncate(top) else vm.loops.set(top, Count(next, c.limit))
+
+    Ok(done)
+end step
+
+private loop_step(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Bool(step(vm, 1)?))
+
+    Ok(())
+end loop_step
+
+private plus_loop_step(vm: &Vm) -> Result[unit, Fault]
+    val n = pop(vm, "+LOOP")?
+
+    push(vm, Bool(step(vm, counter("+LOOP", n)?)?))
+
+    Ok(())
+end plus_loop_step
+
+private w_do(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'DO' is for inside a definition")
+
+    vm.building.push(Native(do_start))
+
+    opening(vm, "DO", DoMark, here(vm))
+end w_do
+
+// **`LOOP` plants the step and then a branch back that is taken when the step says it is not
+// finished**, which is why the runtime word pushes a boolean rather than jumping: a branch is a
+// distance in a body and only the compiling word knows it.
+private close_loop(vm: &Vm, name: string, stepper: &Fn(&Vm) -> Result[unit, Fault]) -> Result[unit, Fault]
+    val m = take_mark(vm, name, DoMark)?
+
+    vm.building.push(Native(stepper))
+    jump_back(vm, m.at, true)
+
+    Ok(())
+end close_loop
+
+private w_loop(vm: &Vm) -> Result[unit, Fault] = close_loop(vm, "LOOP", loop_step)
+private w_plus_loop(vm: &Vm) -> Result[unit, Fault] = close_loop(vm, "+LOOP", plus_loop_step)
+
+private nth_counter(vm: &Vm, name: string, back: usize) -> Result[unit, Fault]
+    if vm.loops.len() <= back
+        return bad("'" + name + "' wants " + str(back + 1) + " counted loops around it")
+
+    push(vm, Long(vm.loops.at(vm.loops.len() - 1 - back).index))
+
+    Ok(())
+end nth_counter
+
+private w_i(vm: &Vm) -> Result[unit, Fault] = nth_counter(vm, "I", 0)
+private w_j(vm: &Vm) -> Result[unit, Fault] = nth_counter(vm, "J", 1)
+
+// Discard the innermost counter, for a definition leaving a loop by `EXIT`.
+private w_unloop(vm: &Vm) -> Result[unit, Fault]
+    if vm.loops.is_empty() then return bad("'UNLOOP' outside a 'DO'")
+
+    vm.loops.truncate(vm.loops.len() - 1)
+
+    Ok(())
+end w_unloop
+
+// --- CASE OF ENDOF ENDCASE ----------------------------------------------------------------------
+
+// The selector stays on the stack for the whole of a `CASE`, and each `OF` compares against a copy of
+// it. This is the runtime half: it takes the value `OF` was given, leaves the selector where it is,
+// and answers whether they matched.
+private case_test(vm: &Vm) -> Result[unit, Fault]
+    val wanted = pop(vm, "OF")?
+    val selector = peek(vm, "OF")?
+
+    push(vm, Bool(same(selector, wanted)))
+
+    Ok(())
+end case_test
+
+// Drop the selector, which every arm has to do and `ENDCASE` does for the one that fell through.
+private case_drop(vm: &Vm) -> Result[unit, Fault]
+    pop(vm, "ENDCASE")?
+
+    Ok(())
+end case_drop
+
+private w_case(vm: &Vm) -> Result[unit, Fault] = opening(vm, "CASE", CaseMark, here(vm))
+
+private w_of(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'OF' is for inside a definition")
+
+    vm.building.push(Native(case_test))
+
+    val at = hole(vm, BranchIfFalse(0))
+
+    vm.building.push(Native(case_drop))
+
+    opening(vm, "OF", IfMark, at)
+end w_of
+
+// **`ENDOF` closes its arm and leaves a mark for `ENDCASE`**, because every arm has to jump over all
+// the arms after it and none of them knows where the end is yet. The marks pile up and `ENDCASE`
+// patches them all at once.
+private w_endof(vm: &Vm) -> Result[unit, Fault]
+    val m = take_mark(vm, "ENDOF", IfMark)?
+    val at = hole(vm, Branch(0))
+
+    patch(vm, m.at)
+    vm.ctrl.push(Mark(EndofMark, at))
+
+    Ok(())
+end w_endof
+
+private w_endcase(vm: &Vm) -> Result[unit, Fault]
+    if !vm.compiling then return bad("'ENDCASE' is for inside a definition")
+
+    vm.building.push(Native(case_drop))
+
+    var pending = true
+
+    while pending
+        vm.ctrl.pop() match
+            Some(m) ->
+                m.kind match
+                    EndofMark -> patch(vm, m.at)
+                    CaseMark -> pending = false
+                    _ -> return bad("'ENDCASE' closes " + opened(m.kind))
+            None -> return bad("'ENDCASE' has no 'CASE' before it")
+
+    Ok(())
+end w_endcase
+
+install_control(vm: &Vm)
+    immediate_native(vm, "IF", w_if, "( c -- ) run what follows if c is true")
+    immediate_native(vm, "ELSE", w_else, "( -- ) the other arm")
+    immediate_native(vm, "THEN", w_then, "( -- ) close the IF")
+    immediate_native(vm, "BEGIN", w_begin, "( -- ) mark the top of a loop")
+    immediate_native(vm, "AGAIN", w_again, "( -- ) loop for ever")
+    immediate_native(vm, "UNTIL", w_until, "( c -- ) loop back while c is false")
+    immediate_native(vm, "WHILE", w_while, "( c -- ) leave the loop when c is false")
+    immediate_native(vm, "REPEAT", w_repeat, "( -- ) close a BEGIN ... WHILE loop")
+    immediate_native(vm, "DO", w_do, "( limit start -- ) begin a counted loop")
+    immediate_native(vm, "LOOP", w_loop, "( -- ) step the counter by one")
+    immediate_native(vm, "+LOOP", w_plus_loop, "( n -- ) step the counter by n")
+    native(vm, "I", w_i, "( -- the innermost loop counter )")
+    native(vm, "J", w_j, "( -- the counter of the loop outside this one )")
+    native(vm, "UNLOOP", w_unloop, "( -- ) discard the innermost loop counter")
+    immediate_native(vm, "CASE", w_case, "( -- ) begin a selection on the value on the stack")
+    immediate_native(vm, "OF", w_of, "( a -- ) this arm, if the selector equals a")
+    immediate_native(vm, "ENDOF", w_endof, "( -- ) close the arm")
+    immediate_native(vm, "ENDCASE", w_endcase, "( -- ) close the selection")
+end install_control

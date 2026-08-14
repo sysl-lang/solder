@@ -27,6 +27,34 @@ struct Word
     help: string
 end Word
 
+// What a control word left behind for its partner to finish.
+//
+// **Which kind it is, as well as where**, so that `THEN` closing a `BEGIN` is refused by name rather
+// than patching a cell that was never a branch. The C original keeps only the address and takes the
+// mismatch on trust.
+enum MarkKind
+    IfMark
+    ElseMark
+    BeginMark
+    WhileMark
+    DoMark
+    CaseMark
+    EndofMark
+end MarkKind
+
+// A hole in the body being built, and what made it.
+struct Mark
+    kind: MarkKind
+    // The index in `building` of the cell to be patched, or of the cell to loop back to.
+    at: usize
+end Mark
+
+// One counted loop in flight: where its counter has got to, and where it stops.
+struct Count
+    index: long
+    limit: long
+end Count
+
 // The interpreter, and the whole of its state.
 //
 // **A `Vm` is a value and carries the session**: words defined by one call to `run` are there for the
@@ -68,7 +96,14 @@ struct Vm
     // **A stack of its own rather than the data stack.** Classic Forth puts these on the data stack,
     // which is why an unbalanced `IF` there corrupts the values a definition was working with; keeping
     // them apart means a mismatched control word is a refusal naming the mismatch.
-    ctrl: Buf[usize]
+    ctrl: Buf[Mark]
+    // The counted loops currently running, innermost last. `I` reads the last and `J` the one before.
+    //
+    // **A stack of its own rather than the return stack.** Forth keeps loop counters on the return
+    // stack, which is why `>R` inside a `DO` corrupts the loop and why `UNLOOP` has to exist before an
+    // early return; here the two are separate and a definition that leaves early cannot damage the
+    // loop it leaves.
+    loops: Buf[Count]
     // The radix `BASE` currently holds, for reading and printing integers.
     base: int
 end Vm
@@ -78,7 +113,7 @@ end Vm
 // **The core words are not here**, so that this file has no dependency on the vocabulary and the
 // vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
 // consumer calls.
-bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, buf(), "", buf(), 10)
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, buf(), "", buf(), buf(), 10)
 
 // Everything the program has printed since the interpreter was made.
 transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())

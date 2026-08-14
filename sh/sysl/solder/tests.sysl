@@ -341,3 +341,57 @@ a_hex_digit_is_not_read_as_a_width_suffix()
     assert_eq(ran("HEX 7F DECIMAL PR"), "127")
     assert_eq(ran("7F PR"), "7")
     assert_eq(ran("7L PR"), "7")
+
+// --- Control flow -----------------------------------------------------------------------------
+
+@test
+if_runs_one_arm_or_the_other()
+    assert_eq(ran("DEF SIGN 0< IF \"neg\" PR ELSE \"pos\" PR THEN END -3 SIGN 4 SIGN"), "negpos")
+    assert_eq(ran("DEF MAYBE IF \"yes\" PR THEN END TRUE MAYBE FALSE MAYBE"), "yes")
+
+@test
+a_control_word_outside_a_definition_is_refused()
+    assert_eq(ran("IF"), "error: 'IF' is for inside a definition")
+    assert_eq(ran("THEN"), "error: 'THEN' is for inside a definition")
+
+@test
+a_control_word_closing_the_wrong_thing_is_refused_by_name() =
+    assert_eq(ran("DEF BAD BEGIN THEN END"), "error: 'THEN' closes a 'BEGIN'")
+
+@test
+a_definition_left_open_by_a_control_word_is_refused_at_its_end() =
+    assert_eq(ran("DEF BAD 1 IF 2 END"), "error: 'BAD' has a control word left open")
+
+@test
+begin_until_runs_the_body_before_it_tests() =
+    assert_eq(ran("VARIABLE N 3 N ! DEF DOWN BEGIN N @ PR N 1-! N @ 0= UNTIL END DOWN"), "321")
+
+@test
+begin_while_repeat_tests_before_it_runs() =
+    assert_eq(ran("VARIABLE N 3 N ! DEF DOWN BEGIN N @ 0> WHILE N @ PR N 1-! REPEAT END DOWN"), "321")
+
+@test
+a_counted_loop_reads_its_counter_with_i() =
+    assert_eq(ran("DEF COUNT 3 0 DO I PR LOOP END COUNT"), "012")
+
+@test
+a_nested_loop_reads_the_outer_counter_with_j() =
+    assert_eq(ran("DEF GRID 2 0 DO 2 0 DO J PR I PR LOOP LOOP END GRID"), "00011011")
+
+// A down-counting loop stops when its counter crosses *below* the limit, so `0 3 DO` runs at zero and
+// stops at minus one -- the mirror of an up-counting loop stopping at the limit rather than on it.
+@test
+a_negative_step_counts_down() =
+    assert_eq(ran("DEF DOWN 0 3 DO I PR -1 +LOOP END DOWN"), "3210")
+
+@test
+a_loop_counter_outside_a_loop_is_refused() =
+    assert_eq(ran("I"), "error: 'I' wants 1 counted loops around it")
+
+@test
+case_selects_one_arm_and_drops_the_selector()
+    val src = "DEF NAME CASE 1 OF \"one\" PR ENDOF 2 OF \"two\" PR ENDOF \"many\" PR ENDCASE END "
+
+    assert_eq(ran(src + "1 NAME .S"), "one<0>")
+    assert_eq(ran(src + "2 NAME .S"), "two<0>")
+    assert_eq(ran(src + "9 NAME .S"), "many<0>")
