@@ -332,6 +332,25 @@ private w_decr_store(vm: &Vm) -> Result[unit, Fault]
     Ok(())
 end w_decr_store
 
+// The space character, as a number. `BL EMIT` is a space, and `BL` reads better in a definition than
+// `32` does.
+private w_bl(vm: &Vm) -> Result[unit, Fault]
+    push(vm, Int(32))
+
+    Ok(())
+end w_bl
+
+// Ask the console to stop.
+//
+// **It sets a flag rather than exiting**, because this package knows nothing about what it is running
+// under: a hosted program returns from `main`, and a board has nowhere to return *to*. `session`
+// reads it and the caller decides.
+private w_bye(vm: &Vm) -> Result[unit, Fault]
+    vm.quitting = true
+
+    Ok(())
+end w_bye
+
 // --- The base ---------------------------------------------------------------------------------
 
 private set_base(vm: &Vm, n: int) -> Result[unit, Fault]
@@ -378,6 +397,8 @@ solder() -> &Vm
     install_control(vm)
     install_aggregate(vm)
     install_maths(vm)
+    install_values(vm)
+    install_format(vm)
 
     vm
 end solder
@@ -401,6 +422,8 @@ private install_core(vm: &Vm)
     native(vm, ".S", w_show_stack, "( -- ) print the stack without disturbing it")
     native(vm, "WORDS", w_words, "( -- ) print every word in the dictionary")
     native(vm, "HELP", w_help, "( -- ) print what the word named after it does")
+    native(vm, "BL", w_bl, "( -- 32 ) the space character")
+    native(vm, "BYE", w_bye, "( -- ) ask the console to stop")
     native(vm, "NULL", w_null, "( -- null )")
     native(vm, "UNDEFINED?", w_undefined, "( a -- whether it is undefined )")
     immediate_native(vm, "DEF", w_def, "( -- ) begin a definition, named by what follows")
@@ -410,6 +433,9 @@ private install_core(vm: &Vm)
     immediate_native(vm, "[']", w_bracket_tick, "( -- ) plant the named definition in the body")
     native(vm, "EXECUTE", w_execute, "( d -- ) run the definition on the stack")
     native(vm, "CONSTANT", w_constant, "( a -- ) file a word answering a, named by what follows")
+    // `CONST` is the C original's abbreviation for it, kept because a program written against Metal
+    // should read here.
+    native(vm, "CONST", w_constant, "( a -- ) what 'CONSTANT' does, abbreviated")
     native(vm, "VARIABLE", w_variable, "( -- ) file a variable, named by what follows")
     native(vm, "@", w_fetch, "( v -- what it holds )")
     native(vm, "!", w_store, "( a v -- ) put a in it")

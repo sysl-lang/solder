@@ -19,6 +19,7 @@ COUNT                             // 0 1 2 3 4
 XS LENGTH PR                      // 3
 {} "x" 1 PUT "y" 2 PUT PR         // {x: 1 y: 2}
 HEX FF PR                         // ff
+3.14159 "{>8.2}" PRINTF           //     3.14
 ```
 
 ## What it adds to Forth
@@ -60,11 +61,20 @@ than where it is:
 | `INDEX` — a `cell_t*` at an array element | `INDEX@` and `INDEX!`, which were already there beside it |
 
 Where the port does something the original does not, it is written down at the point it happens.
-There are four so far: `HEX FF` is two hundred and fifty-five rather than the float fifteen (`F` is a
+There are five so far: `HEX FF` is two hundred and fifty-five rather than the float fifteen (`F` is a
 digit in base sixteen, and the original tests for a width suffix before it tries the base); `GET`
-exists, the original having a `PUT` and no way to read a key back; `+` joins two strings; and a
-control word that closes the wrong thing is refused by name rather than patching a cell that was
-never a branch.
+exists, the original having a `PUT` and no way to read a key back; `+` joins two strings; a control
+word that closes the wrong thing is refused by name rather than patching a cell that was never a
+branch; and **a colour, a moment, a coordinate and a complex number can be built at all** — the
+original has all four in its cell and no word in front of any of them, so they were reachable from C
+and unreachable from the language.
+
+**Twenty-six of the original's words are not here, and all but three of them cannot be.** Fifteen are
+refcount and memory introspection — `REFCOUNT`, `MEM-STATS`, `CELL-SHARED?`, `INTERN-COUNT` and their
+neighbours — which have no counterpart when the counting is the language's, there is no intern pool
+and a cell has no address a program can see. Three are `(DO)`, `(LOOP)` and `(+LOOP)`, the runtime
+halves of the counted loop, which are internal here rather than words. `INDEX` is the pointer named
+in the table above. The three that could exist and do not are `DEBUG-ON`, `DEBUG-OFF` and `TEST`.
 
 ## Vocabulary
 
@@ -79,7 +89,14 @@ never a branch.
 | arrays and objects | `[]` `,` `LENGTH` `INDEX@` `INDEX!` `{}` `PUT` `GET` `HAS?` `KEYS` `VALUES` `ENTRIES` `FROM-ENTRIES` |
 | floating point | `SIN` `COS` `TAN` `ASIN` `ACOS` `ATAN` `ATAN2` `EXP` `LN` `LOG10` `**` `SQRT` `FLOOR` `CEIL` `ROUND` `TRUNC` `FMOD` `PI` `E` |
 | printing and the base | `PR` `CR` `SPACE` `EMIT` `WORDS` `HELP` `DECIMAL` `HEX` `BINARY` `OCTAL` `BASE` |
-| values | `NULL` `UNDEFINED?` `STRING-EMPTY?` |
+| the four other cells | `RGB` `RED` `GREEN` `BLUE` `DATETIME` `EPOCH` `TZ` `COORD` `LON` `LAT` `COMPLEX` `RE` `IM` |
+| text | `FORMAT` `PRINTF` `STRING-EMPTY?` |
+| values | `NULL` `UNDEFINED?` `BL` `BYE` |
+
+`FORMAT` is a template with `{}` in it, filled from the stack — **not `printf`**, because a cell
+already knows what it is, so everything inside the braces is about layout rather than about type:
+`{>8.2}` is right-aligned in eight columns to two decimal places, `{04x}` is zero-padded hexadecimal,
+and `{{` is a literal brace. `PRINTF` is `FORMAT` and `PR`.
 
 **A control structure may be typed at the prompt.** An opening word with no `DEF` around it builds an
 anonymous definition, which runs the moment its structure closes and is never filed — so
@@ -95,7 +112,7 @@ underneath itself.
 
 ```
 dependencies {
-  solder { git = "github.com/sysl-lang/solder", version = "0.2.0" }
+  solder { git = "github.com/sysl-lang/solder", version = "0.3.0" }
 }
 ```
 
@@ -125,8 +142,8 @@ it, so the capability costs nothing that is not already spent.
 sysl test .
 ```
 
-Ninety of them, and nearly all are asserted through the transcript — what a person typing would
-see — rather than through the stack, because the transcript is what is promised.
+A hundred and ten of them, and nearly all are asserted through the transcript — what a person
+typing would see — rather than through the stack, because the transcript is what is promised.
 
 ## The consoles
 
@@ -144,7 +161,7 @@ package bought.
 
 ## Status
 
-The language runs, and is tagged `v0.2.0`. The board image builds and links; nothing has been run on
+The language runs, and is tagged `v0.3.0`. The board image builds and links; nothing has been run on
 real silicon yet.
 
 ## Licence

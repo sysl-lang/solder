@@ -1,0 +1,151 @@
+module sh.sysl.solder
+
+// The four cells that are neither a number nor a container: a colour, a moment, a coordinate and a
+// complex number.
+//
+// **The C original can build none of them from SOLDER.** `new_rgb`, `new_datetime`, `new_coordinate`
+// and `new_complex` are C functions with no word in front of them, so the four types exist in the
+// cell, print, compare, and are unreachable from the language itself. A type nothing can make is not
+// a feature, so each gets a constructor and the accessors that read it back.
+//
+// **They are in the cell rather than in an object because of what they are for.** A colour on a
+// microcontroller is three bytes written to a pin driver a thousand times a second, and a moment is a
+// stamp read off an RTC; an object with three keys would put a heap allocation and a string lookup in
+// front of both. This is the one place SOLDER's typed cell is doing something a plain Forth's could
+// not, and the words below are what make it reachable.
+
+private byte_of(name: string, part: string, c: Cell) -> Result[u8, Fault]
+    c match
+        Int(v) ->
+            if v < 0 || v > 255
+                bad("'" + name + "' wants " + part + " from 0 to 255 -- it got " + str(v))
+            else
+                Ok(u8(v))
+        _ -> bad("'" + name + "' wants " + part + " as a number -- it got " + kind(c))
+end byte_of
+
+private real_of(name: string, part: string, c: Cell) -> Result[f32, Fault]
+    c match
+        Int(v) -> Ok(f32(v))
+        Long(v) -> Ok(f32(v))
+        Real(v) -> Ok(f32(v))
+        _ -> bad("'" + name + "' wants " + part + " as a number -- it got " + kind(c))
+end real_of
+
+private whole_of(name: string, part: string, c: Cell) -> Result[long, Fault]
+    c match
+        Int(v) -> Ok(long(v))
+        Long(v) -> Ok(v)
+        _ -> bad("'" + name + "' wants " + part + " as an integer -- it got " + kind(c))
+end whole_of
+
+// --- A colour ---------------------------------------------------------------------------------
+
+private w_rgb(vm: &Vm) -> Result[unit, Fault]
+    val b = pop(vm, "RGB")?
+    val (r, g) = pop2(vm, "RGB")?
+
+    push(vm, Rgb(byte_of("RGB", "red", r)?, byte_of("RGB", "green", g)?, byte_of("RGB", "blue", b)?))
+
+    Ok(())
+end w_rgb
+
+private channel(vm: &Vm, name: string, which: int) -> Result[unit, Fault]
+    val a = pop(vm, name)?
+
+    a match
+        Rgb(r, g, b) -> push(vm, Int(int(if which == 0 then r else if which == 1 then g else b)))
+        _ -> return bad("'" + name + "' wants a colour -- it got " + kind(a))
+
+    Ok(())
+end channel
+
+private w_red(vm: &Vm) -> Result[unit, Fault] = channel(vm, "RED", 0)
+private w_green(vm: &Vm) -> Result[unit, Fault] = channel(vm, "GREEN", 1)
+private w_blue(vm: &Vm) -> Result[unit, Fault] = channel(vm, "BLUE", 2)
+
+// --- A moment ---------------------------------------------------------------------------------
+
+private w_datetime(vm: &Vm) -> Result[unit, Fault]
+    val (seconds, tz) = pop2(vm, "DATETIME")?
+    val s = whole_of("DATETIME", "the seconds", seconds)?
+    val z = whole_of("DATETIME", "the offset", tz)?
+
+    if s < 0 || s > 4294967295 then return bad("'DATETIME' wants seconds since 1970 -- it got " + str(s))
+    if z < -1440 || z > 1440 then return bad("'DATETIME' wants minutes from UTC -- it got " + str(z))
+
+    push(vm, Stamp(u32(s), i16(z)))
+
+    Ok(())
+end w_datetime
+
+private w_epoch(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "EPOCH")?
+
+    a match
+        Stamp(seconds, _) -> push(vm, Long(long(seconds)))
+        _ -> return bad("'EPOCH' wants a moment -- it got " + kind(a))
+
+    Ok(())
+end w_epoch
+
+private w_tz(vm: &Vm) -> Result[unit, Fault]
+    val a = pop(vm, "TZ")?
+
+    a match
+        Stamp(_, tz) -> push(vm, Int(int(tz)))
+        _ -> return bad("'TZ' wants a moment -- it got " + kind(a))
+
+    Ok(())
+end w_tz
+
+// --- A coordinate and a complex number ----------------------------------------------------------
+
+private w_coord(vm: &Vm) -> Result[unit, Fault]
+    val (lon, lat) = pop2(vm, "COORD")?
+
+    push(vm, Coord(real_of("COORD", "the longitude", lon)?, real_of("COORD", "the latitude", lat)?))
+
+    Ok(())
+end w_coord
+
+private part_of(vm: &Vm, name: string, first: bool) -> Result[unit, Fault]
+    val a = pop(vm, name)?
+
+    a match
+        Coord(lon, lat) -> push(vm, Real(f64(if first then lon else lat)))
+        Complex(re, im) -> push(vm, Real(f64(if first then re else im)))
+        _ -> return bad("'" + name + "' wants a coordinate or a complex number -- it got " + kind(a))
+
+    Ok(())
+end part_of
+
+private w_lon(vm: &Vm) -> Result[unit, Fault] = part_of(vm, "LON", true)
+private w_lat(vm: &Vm) -> Result[unit, Fault] = part_of(vm, "LAT", false)
+private w_re(vm: &Vm) -> Result[unit, Fault] = part_of(vm, "RE", true)
+private w_im(vm: &Vm) -> Result[unit, Fault] = part_of(vm, "IM", false)
+
+private w_complex(vm: &Vm) -> Result[unit, Fault]
+    val (re, im) = pop2(vm, "COMPLEX")?
+
+    push(vm, Complex(real_of("COMPLEX", "the real part", re)?,
+                     real_of("COMPLEX", "the imaginary part", im)?))
+
+    Ok(())
+end w_complex
+
+install_values(vm: &Vm)
+    native(vm, "RGB", w_rgb, "( r g b -- colour ) three channels, each 0 to 255")
+    native(vm, "RED", w_red, "( colour -- n )")
+    native(vm, "GREEN", w_green, "( colour -- n )")
+    native(vm, "BLUE", w_blue, "( colour -- n )")
+    native(vm, "DATETIME", w_datetime, "( seconds tz -- moment ) seconds since 1970, minutes from UTC")
+    native(vm, "EPOCH", w_epoch, "( moment -- seconds )")
+    native(vm, "TZ", w_tz, "( moment -- minutes from UTC )")
+    native(vm, "COORD", w_coord, "( lon lat -- coordinate )")
+    native(vm, "LON", w_lon, "( coordinate -- longitude )")
+    native(vm, "LAT", w_lat, "( coordinate -- latitude )")
+    native(vm, "COMPLEX", w_complex, "( re im -- z )")
+    native(vm, "RE", w_re, "( z -- the real part )")
+    native(vm, "IM", w_im, "( z -- the imaginary part )")
+end install_values

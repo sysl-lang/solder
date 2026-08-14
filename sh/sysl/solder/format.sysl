@@ -1,0 +1,293 @@
+module sh.sysl.solder
+
+import sysl.buf.{Buf, buf}
+import sysl.math.Float
+
+// `FORMAT` -- a template with `{}` in it, filled from the stack.
+//
+// **It is not `printf`.** There is no `%d` against a `%s` to get wrong, because a cell already knows
+// what it is: `{}` renders whatever arrives exactly as `PR` would, and everything inside the braces
+// is about *layout* rather than about type. That is the one thing a typed cell buys a formatter, and
+// it is why the C original spells it this way too.
+//
+// ```
+// 1 2 "{} and {}" FORMAT PR                 // 1 and 2
+// 255 "{04x}" FORMAT PR                     // 00ff
+// 3.14159 "{>8.2}" FORMAT PR                //     3.14
+// "hi" "{^6}|" FORMAT PR                    //   hi  |
+// ```
+//
+// **The arguments are read deepest-first**, so they appear in the order they were pushed and the
+// template reads like the line that made it. `{{` is a literal brace.
+
+// What is written inside the braces.
+private struct Spec
+    // 0 left, 1 right, 2 centred. Left is the default, which is what an unadorned `{}` gets.
+    align: int
+    width: usize
+    zero_pad: bool
+    hex: bool
+    // Decimal places for a float, characters for a string; -1 where none was asked for.
+    precision: int
+end Spec
+
+// `[>^][0]width[x][.precision]`, and nothing else -- a spec with anything left over is refused rather
+// than half-read, so a typo is a sentence instead of a surprising column.
+private parse_spec(spec: []const u8) -> Option[Spec]
+    var align = 0
+    var width: usize = 0
+    var zero_pad = false
+    var hex = false
+    var precision = -1
+    var i: usize = 0
+
+    if i < spec.len && (spec[i] == u8('>') || spec[i] == u8('^'))
+        align = if spec[i] == u8('>') then 1 else 2
+        i += 1
+
+    if i < spec.len && digit(spec[i])
+        // A leading zero is the padding character rather than part of the width, which is why it is
+        // only read as one when a digit follows: `{0}` is a width of nothing and means what `{}` does.
+        if spec[i] == u8('0') && i + 1 < spec.len && digit(spec[i + 1])
+            zero_pad = true
+            i += 1
+
+        while i < spec.len && digit(spec[i])
+            width = width * 10 + usize(spec[i] - u8('0'))
+            i += 1
+
+    if i < spec.len && spec[i] == u8('x')
+        hex = true
+        i += 1
+
+    if i < spec.len && spec[i] == u8('.')
+        i += 1
+
+        if i >= spec.len || !digit(spec[i]) then return None
+
+        precision = 0
+
+        while i < spec.len && digit(spec[i])
+            precision = precision * 10 + int(spec[i] - u8('0'))
+            i += 1
+
+    if i != spec.len then return None
+
+    // **Padding with zeroes means right alignment**, and saying so here rather than in `padded` is
+    // what keeps that from being two rules: `{04}` is a number in a four-wide column, and a number
+    // left-aligned against zeroes on its right would be a different number.
+    if zero_pad && align == 0 then align = 1
+
+    Some(Spec(align, width, zero_pad, hex, precision))
+end parse_spec
+
+private digit(b: u8) -> bool = b >= u8('0') && b <= u8('9')
+
+// How many characters a string will occupy, which is not how many bytes it holds.
+private width_of(s: string) -> usize
+    var n: usize = 0
+
+    for _ in s.chars
+        n += 1
+
+    n
+end width_of
+
+// A float with a fixed number of decimal places.
+//
+// **Written here rather than taken from `str`**, which renders a float the shortest way that reads
+// back as the same number -- exactly the wrong answer for a column of figures, where what is wanted
+// is the same number of places whether or not the digits are interesting.
+private fixed(v: f64, places: int) -> string
+    if places <= 0 then return str(long(v.round()))
+
+    val negative = v < 0.0
+    val a = if negative then -v else v
+    var scale: long = 1
+
+    for _ in 0..<places
+        scale *= 10
+
+    val n = long((a * f64(scale)).round())
+    var frac = str(n % scale)
+
+    while int(frac.len) < places
+        frac = "0" + frac
+
+    (if negative then "-" else "") + str(n / scale) + "." + frac
+end fixed
+
+// One argument, rendered as its spec asks.
+private rendered(c: Cell, spec: Spec, base: int) -> string
+    var out = show(c, base)
+
+    if spec.hex
+        c match
+            Int(v) -> out = radix(long(v), 16)
+            Long(v) -> out = radix(v, 16)
+            _ -> ()
+
+    if spec.precision >= 0
+        c match
+            Real(v) -> out = fixed(v, spec.precision)
+            Text(s) -> out = truncated(s, usize(spec.precision))
+            _ -> ()
+
+    padded(out, spec)
+end rendered
+
+private truncated(s: string, n: usize) -> string
+    var out = ""
+    var taken: usize = 0
+
+    for ch in s.chars
+        if taken == n then return out
+
+        out = out + string(ch)
+        taken += 1
+
+    out
+end truncated
+
+// The text in its column.
+//
+// **Zero padding goes after the sign**, so a negative number in `{04}` is `-007` rather than `0-07`.
+// It is the one place padding has to look at what it is padding.
+private padded(s: string, spec: Spec) -> string
+    val have = width_of(s)
+
+    if have >= spec.width then return s
+
+    val missing = spec.width - have
+
+    if spec.align == 2
+        val left = missing / 2
+
+        return repeated(" ", left) + s + repeated(" ", missing - left)
+
+    if spec.align == 0 then return s + repeated(" ", missing)
+
+    if !spec.zero_pad then return repeated(" ", missing) + s
+
+    if s.len > 0 && s.bytes[0] == u8('-')
+        "-" + repeated("0", missing) + from_utf8_unchecked(s.bytes[1..<s.len])
+    else
+        repeated("0", missing) + s
+end padded
+
+private repeated(s: string, n: usize) -> string
+    var out = ""
+
+    for _ in 0..<n
+        out = out + s
+
+    out
+end repeated
+
+// How many placeholders a template has, or a refusal if one of them never closes.
+private placeholders(template: string) -> Result[usize, Fault]
+    val b = template.bytes
+    var n: usize = 0
+    var i: usize = 0
+
+    while i < b.len
+        if b[i] != u8('{')
+            i += 1
+        else if i + 1 < b.len && b[i + 1] == u8('{')
+            i += 2
+        else
+            var j = i + 1
+
+            while j < b.len && b[j] != u8('}')
+                j += 1
+
+            if j >= b.len then return bad("'FORMAT' has a '{' that is never closed")
+
+            n += 1
+            i = j + 1
+
+    Ok(n)
+end placeholders
+
+// The template filled from `args`, which are in the order they were pushed.
+format(template: string, args: &Buf[Cell], base: int) -> Result[string, Fault]
+    val b = template.bytes
+    var out = ""
+    var next: usize = 0
+    var i: usize = 0
+
+    while i < b.len
+        if b[i] != u8('{')
+            var j = i
+
+            while j < b.len && b[j] != u8('{')
+                j += 1
+
+            out = out + from_utf8_unchecked(b[i..<j])
+            i = j
+        else if i + 1 < b.len && b[i + 1] == u8('{')
+            out = out + "{"
+            i += 2
+        else
+            var j = i + 1
+
+            while j < b.len && b[j] != u8('}')
+                j += 1
+
+            if j >= b.len then return bad("'FORMAT' has a '{' that is never closed")
+
+            val spec = parse_spec(b[i + 1..<j]) match
+                Some(s) -> s
+                None -> return bad("'FORMAT' cannot read the layout '"
+                                   + from_utf8_unchecked(b[i + 1..<j]) + "'")
+
+            out = out + rendered(args.at(next), spec, base)
+            next += 1
+            i = j + 1
+
+    Ok(out)
+end format
+
+private w_format(vm: &Vm) -> Result[unit, Fault]
+    val t = pop(vm, "FORMAT")?
+
+    if !is_text(t) then return bad("'FORMAT' wants a template string -- it got " + kind(t))
+
+    val wanted = placeholders(text(t))?
+
+    if depth(vm) < wanted
+        return bad("'FORMAT' has " + str(wanted) + " places to fill and the stack holds "
+                   + str(depth(vm)))
+
+    // **The arguments are taken deepest-first**, so `1 2 "{} and {}"` reads as it was written. They
+    // are copied out before any is popped, because a template may name fewer than the stack holds and
+    // what is left below has to stay where it was.
+    var args: Buf[Cell] = buf()
+
+    for k in 0..<wanted
+        args.push(vm.data.at(depth(vm) - wanted + k))
+
+    val out = format(text(t), args, vm.base)?
+
+    for _ in 0..<wanted
+        pop(vm, "FORMAT")?
+
+    push(vm, Text(out))
+
+    Ok(())
+end w_format
+
+private w_printf(vm: &Vm) -> Result[unit, Fault]
+    w_format(vm)?
+
+    val s = pop(vm, "PRINTF")?
+
+    emit(vm, text(s))
+
+    Ok(())
+end w_printf
+
+install_format(vm: &Vm)
+    native(vm, "FORMAT", w_format, "( args... template -- string ) fill {} from the stack")
+    native(vm, "PRINTF", w_printf, "( args... template -- ) fill it and print it")
+end install_format

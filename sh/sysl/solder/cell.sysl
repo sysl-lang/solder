@@ -89,8 +89,6 @@ enum Cell
     Stamp(seconds: u32, tz_minutes: i16)
     Coord(lon: f32, lat: f32)
     Complex(re: f32, im: f32)
-    // Two 32-bit integers in one cell, which is what `/MOD` and `*/MOD` answer with.
-    Pair(first: int, second: int)
 end Cell
 
 // **The fold, pinned.** The `string` is the widest payload and everything else fits inside it for
@@ -131,7 +129,6 @@ kind(c: Cell) -> string
         Stamp(_, _) -> "a moment"
         Coord(_, _) -> "a coordinate"
         Complex(_, _) -> "a complex number"
-        Pair(_, _) -> "a pair"
 end kind
 
 // Whether a cell is a string.
@@ -210,9 +207,6 @@ same(a: Cell, b: Cell) -> bool
             _ -> false
         Complex(re, im) -> b match
             Complex(re2, im2) -> re == re2 && im == im2
-            _ -> false
-        Pair(f, s) -> b match
-            Pair(f2, s2) -> f == f2 && s == s2
             _ -> false
         _ -> false
 end same

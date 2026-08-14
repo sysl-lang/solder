@@ -661,3 +661,113 @@ a_refusal_clears_what_was_half_built_and_the_session_carries_on()
     assert(!pending(vm))
     assert_eq(depth(vm), 1)
     assert(same(vm.data.at(0), Int(16)))
+
+// --- The four values that are neither a number nor a container -------------------------------------
+
+@test
+a_colour_is_built_and_read_back()
+    assert_eq(ran("255 128 0 RGB PR"), "#FF8000")
+    assert_eq(ran("255 128 0 RGB RED PR"), "255")
+    assert_eq(ran("255 128 0 RGB GREEN PR"), "128")
+    assert_eq(ran("255 128 0 RGB BLUE PR"), "0")
+
+@test
+a_channel_outside_a_byte_is_refused() =
+    assert_eq(ran("300 0 0 RGB"), "error: 'RGB' wants red from 0 to 255 -- it got 300")
+
+@test
+a_moment_keeps_its_seconds_and_its_offset()
+    assert_eq(ran("1700000000 -300 DATETIME EPOCH PR"), "1700000000")
+    assert_eq(ran("1700000000 -300 DATETIME TZ PR"), "-300")
+
+@test
+a_coordinate_and_a_complex_number_are_two_pairs_of_floats()
+    assert_eq(ran("1.5 2.5 COORD LON PR"), "1.5")
+    assert_eq(ran("1.5 2.5 COORD LAT PR"), "2.5")
+    assert_eq(ran("3 4 COMPLEX RE PR"), "3")
+    assert_eq(ran("3 4 COMPLEX IM PR"), "4")
+
+@test
+asking_a_number_for_a_channel_is_refused() =
+    assert_eq(ran("1 RED"), "error: 'RED' wants a colour -- it got an integer")
+
+// --- FORMAT ---------------------------------------------------------------------------------------
+
+@test
+the_places_are_filled_in_the_order_the_arguments_were_pushed() =
+    assert_eq(ran("1 2 \"{} and {}\" FORMAT PR"), "1 and 2")
+
+@test
+a_template_with_no_places_is_itself() =
+    assert_eq(ran("\"nothing here\" FORMAT PR"), "nothing here")
+
+// `{{` is a literal brace and a lone `}` already is one, so a closing brace needs no doubling -- which
+// is the C original's rule and is why `}}` is two of them rather than one.
+@test
+a_doubled_brace_is_a_literal_one()
+    assert_eq(ran("7 \"{{{}}\" FORMAT PR"), "{7}")
+    assert_eq(ran("\"{{}}\" FORMAT PR"), "{}}")
+
+@test
+width_and_alignment_lay_a_column_out()
+    assert_eq(ran("\"hi\" \"[{6}]\" FORMAT PR"), "[hi    ]")
+    assert_eq(ran("\"hi\" \"[{>6}]\" FORMAT PR"), "[    hi]")
+    assert_eq(ran("\"hi\" \"[{^6}]\" FORMAT PR"), "[  hi  ]")
+
+@test
+a_leading_zero_pads_with_zeroes_after_the_sign()
+    assert_eq(ran("7 \"{04}\" FORMAT PR"), "0007")
+    assert_eq(ran("-7 \"{04}\" FORMAT PR"), "-007")
+
+@test
+x_writes_an_integer_in_hexadecimal_whatever_the_base()
+    assert_eq(ran("255 \"{x}\" FORMAT PR"), "ff")
+    assert_eq(ran("255 \"{04x}\" FORMAT PR"), "00ff")
+
+@test
+a_precision_fixes_the_decimal_places_of_a_float()
+    assert_eq(ran("3.14159 \"{.2}\" FORMAT PR"), "3.14")
+    assert_eq(ran("3.14159 \"{>8.2}\" FORMAT PR"), "    3.14")
+    assert_eq(ran("2.0 \"{.3}\" FORMAT PR"), "2.000")
+    assert_eq(ran("-1.25 \"{.1}\" FORMAT PR"), "-1.3")
+
+@test
+a_precision_truncates_a_string() =
+    assert_eq(ran("\"abcdef\" \"{.3}\" FORMAT PR"), "abc")
+
+@test
+the_width_of_a_column_is_in_characters_rather_than_bytes() =
+    assert_eq(ran("\"héllo\" \"[{>7}]\" FORMAT PR"), "[  héllo]")
+
+@test
+a_template_wanting_more_than_the_stack_holds_is_refused() =
+    assert_eq(ran("1 \"{} and {}\" FORMAT"),
+              "error: 'FORMAT' has 2 places to fill and the stack holds 1")
+
+@test
+an_unclosed_or_unreadable_place_is_refused()
+    assert_eq(ran("1 \"{\" FORMAT"), "error: 'FORMAT' has a '{' that is never closed")
+    assert_eq(ran("1 \"{q}\" FORMAT"), "error: 'FORMAT' cannot read the layout 'q'")
+
+@test
+printf_is_format_and_print() =
+    assert_eq(ran("6 7 \"{} times {}\" PRINTF"), "6 times 7")
+
+@test
+format_leaves_what_it_did_not_ask_for() =
+    assert_eq(ran("9 1 2 \"{} and {}\" FORMAT DROP .S"), "<1> 9")
+
+@test
+bye_is_a_word_rather_than_a_line_the_console_watches_for()
+    val vm = solder()
+
+    run(vm, "1 BYE").unwrap()
+
+    assert(vm.quitting)
+    assert_eq(depth(vm), 1)
+
+@test
+bl_is_the_space_character_and_const_is_constant()
+    assert_eq(ran("BL PR"), "32")
+    assert_eq(ran("BL EMIT"), " ")
+    assert_eq(ran("42 CONST ANSWER ANSWER PR"), "42")

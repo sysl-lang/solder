@@ -211,6 +211,7 @@ pending(vm: &Vm) -> bool = vm.compiling
 reset(vm: &Vm)
     vm.compiling = false
     vm.anon = false
+    vm.quitting = false
     vm.building = buf()
     vm.building_name = ""
 

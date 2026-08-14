@@ -107,6 +107,10 @@ struct Vm
     // early return; here the two are separate and a definition that leaves early cannot damage the
     // loop it leaves.
     loops: Buf[Count]
+    // Whether `BYE` has been typed. A console reads it and stops; nothing else in the language does
+    // anything about it, because where there is to go is the console's question and not the
+    // language's -- a hosted program returns from `main` and a board has nowhere to return to.
+    quitting: bool
     // The radix `BASE` currently holds, for reading and printing integers.
     base: int
 end Vm
@@ -116,7 +120,7 @@ end Vm
 // **The core words are not here**, so that this file has no dependency on the vocabulary and the
 // vocabulary can be split across as many files as it wants. `solder()` in `core.sysl` is what a
 // consumer calls.
-bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, false, buf(), "", buf(), buf(), 10)
+bare_vm() -> &Vm = Vm(buf(), buf(), buf(), buf(), buf(), "", 0, false, false, buf(), "", buf(), buf(), false, 10)
 
 // Everything the program has printed since the interpreter was made.
 transcript(vm: &Vm) -> string = from_utf8_unchecked(vm.out.view())

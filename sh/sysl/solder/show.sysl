@@ -27,7 +27,6 @@ show(c: Cell, base: int) -> string
         Stamp(seconds, tz) -> str(seconds) + "@" + str(tz)
         Coord(lon, lat) -> str(lon) + "," + str(lat)
         Complex(re, im) -> str(re) + (if im < 0.0f32 then "" else "+") + str(im) + "i"
-        Pair(first, second) -> str(first) + " " + str(second)
 end show
 
 // An array's elements, space separated. A nested array keeps its brackets, since inside one they are

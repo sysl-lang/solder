@@ -27,9 +27,9 @@ end ends_a_line
 
 // Every line the cursor yields, run, with whatever it printed shown as it goes.
 //
-// Returns when the cursor ends or when `BYE` is typed on a line of its own. **What to do about that
-// is the caller's**, and the two answers differ: a hosted program returns from `main`, while a board
-// has nowhere to exit *to* and says so rather than falling off the end.
+// Returns when the cursor ends or when `BYE` is run. **What to do about that is the caller's**, and
+// the two answers differ: a hosted program returns from `main`, while a board has nowhere to exit
+// *to* and says so rather than falling off the end.
 //
 // ## The continuation prompt, and why it is not the one a parsed language has
 //
@@ -49,8 +49,6 @@ session(vm: &Vm, cursor: *Iterate[string])
     prints("solder> ")
 
     for line in cursor
-        if !pending(vm) && line == "BYE" then break
-
         var fault = ""
 
         run(vm, line) match
@@ -69,6 +67,8 @@ session(vm: &Vm, cursor: *Iterate[string])
 
         if !ends_a_line(out) then print("")
         if fault != "" then print(fault)
+
+        if vm.quitting then break
 
         prints(if pending(vm) then ".... " else "solder> ")
 
