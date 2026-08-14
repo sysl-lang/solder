@@ -154,7 +154,7 @@ banner, and that is all it does.
 | | |
 |---|---|
 | [**solder-host**](https://github.com/sysl-lang/solder-host) | at a terminal, over `sysl.term.edit` |
-| [**solder-pico2**](https://github.com/sysl-lang/solder-pico2) | on a Raspberry Pi Pico 2 W, over USB serial — 353 KB of flash and 5.3 KB of static RAM, and no C in the project at all |
+| [**solder-pico2**](https://github.com/sysl-lang/solder-pico2) | on a Raspberry Pi Pico 2 W, over USB serial — 400 KB of flash and 5.3 KB of static RAM, and no C in the project at all |
 
 The two differ in their first few lines and nowhere else, which is what putting the loop in the
 package bought.
