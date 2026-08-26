@@ -12,14 +12,19 @@
 // This is the block a *consumer* writes to reach it:
 //
 //     dependencies {
-//       solder { git = "github.com/sysl-lang/solder", version = "0.1.0" }
+//       solder { git = "github.com/sysl-lang/solder", version = "0.4.1" }
 //     }
 //
 // The coordinate names the package, `solder`; the module a program imports is `sh.sysl.solder`.
 
 package {
   name    = "solder"
-  version = "0.1.0"
+  version = "0.4.1"
+
+  // `from_utf8_unchecked` became an ordinary `sysl.text` function in 0.0.82, over a raw-tier
+  // `str_cast`. It was a form in scope everywhere before that, so the four files here that reach it
+  // gained an import and this floor is what says why an older compiler will not do.
+  sysl    = "0.0.82"
 }
 
 // **`heap = true`, and it is a decision rather than an oversight.** The dictionary grows as words are

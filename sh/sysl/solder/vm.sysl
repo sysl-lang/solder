@@ -1,6 +1,7 @@
 module sh.sysl.solder
 
 import sysl.buf.{Buf, buf}
+import sysl.text.from_utf8_unchecked
 
 // Where the interpreter has got to inside one definition.
 //

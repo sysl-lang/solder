@@ -1,7 +1,7 @@
 module sh.sysl.solder
 
 import sysl.buf.{Buf, buf}
-import sysl.text.{parse_long_base, parse_real}
+import sysl.text.{from_utf8_unchecked, parse_long_base, parse_real}
 
 // What the reader hands back, one at a time.
 //

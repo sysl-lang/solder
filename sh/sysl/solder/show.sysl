@@ -1,6 +1,7 @@
 module sh.sysl.solder
 
 import sysl.buf.{Buf, buf}
+import sysl.text.from_utf8_unchecked
 
 // A cell as a person reads it back.
 //

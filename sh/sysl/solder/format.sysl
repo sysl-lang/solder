@@ -2,6 +2,7 @@ module sh.sysl.solder
 
 import sysl.buf.{Buf, buf}
 import sysl.math.Float
+import sysl.text.from_utf8_unchecked
 
 // `FORMAT` -- a template with `{}` in it, filled from the stack.
 //
