@@ -258,7 +258,7 @@ private w_plus_loop(vm: &Vm) -> Result[unit, Fault] = close_loop(vm, "+LOOP", pl
 
 private nth_counter(vm: &Vm, name: string, back: usize) -> Result[unit, Fault]
     if vm.loops.len() <= back
-        return bad("'" + name + "' wants " + str(back + 1) + " counted loops around it")
+        return bad("'" + name + "' wants " + (back + 1).to_string() + " counted loops around it")
 
     push(vm, Long(vm.loops.at(vm.loops.len() - 1 - back).index))
 

@@ -171,7 +171,7 @@ depth(vm: &Vm) -> usize = vm.data.len()
 // than a loop inside `.S`: a person who has learned to read one has learned to read the other, and a
 // trace in a different format would be a second notation for the one thing being looked at.
 stack_view(vm: &Vm) -> string
-    var out = "<" + str(depth(vm)) + ">"
+    var out = "<" + depth(vm).to_string() + ">"
 
     for i in 0..<depth(vm)
         out = out + " " + show(vm.data.at(i), vm.base)

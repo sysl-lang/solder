@@ -96,7 +96,7 @@ private index(vm: &Vm, name: string) -> Result[usize, Fault]
     n match
         Int(v) ->
             if v < 0 || usize(v) >= depth(vm)
-                bad("'" + name + "' asked for " + str(v) + " of a stack " + str(depth(vm)) + " deep")
+                bad("'" + name + "' asked for " + v.to_string() + " of a stack " + depth(vm).to_string() + " deep")
             else
                 Ok(usize(v))
         _ -> bad("'" + name + "' wants a count -- it got " + kind(n))
@@ -389,7 +389,7 @@ private w_base(vm: &Vm) -> Result[unit, Fault]
 
     a match
         Int(v) ->
-            if v < 2 || v > 36 then return bad("'BASE' takes 2 to 36 -- it got " + str(v))
+            if v < 2 || v > 36 then return bad("'BASE' takes 2 to 36 -- it got " + v.to_string())
 
             vm.base = v
         _ -> return bad("'BASE' wants a number -- it got " + kind(a))

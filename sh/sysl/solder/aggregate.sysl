@@ -62,7 +62,7 @@ private at(name: string, items: &Buf[Cell], n: Cell) -> Result[usize, Fault]
     n match
         Int(v) ->
             if v < 0 || usize(v) >= items.len()
-                bad("'" + name + "' asked for " + str(v) + " of " + str(items.len()) + " elements")
+                bad("'" + name + "' asked for " + v.to_string() + " of " + items.len().to_string() + " elements")
             else
                 Ok(usize(v))
         _ -> bad("'" + name + "' wants an index -- it got " + kind(n))
@@ -210,7 +210,7 @@ private w_from_entries(vm: &Vm) -> Result[unit, Fault]
                     Arr(pair) ->
                         if pair.len() != 2
                             return bad("'FROM-ENTRIES' wants pairs -- one has "
-                                       + str(pair.len()) + " elements")
+                                       + pair.len().to_string() + " elements")
 
                         val key = keyed("FROM-ENTRIES", pair.at(0))?
 

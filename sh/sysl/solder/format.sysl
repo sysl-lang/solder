@@ -100,7 +100,7 @@ end width_of
 // back as the same number -- exactly the wrong answer for a column of figures, where what is wanted
 // is the same number of places whether or not the digits are interesting.
 private fixed(v: f64, places: int) -> string
-    if places <= 0 then return str(long(v.round()))
+    if places <= 0 then return long(v.round()).to_string()
 
     val negative = v < 0.0
     val a = if negative then -v else v
@@ -110,12 +110,12 @@ private fixed(v: f64, places: int) -> string
         scale *= 10
 
     val n = long((a * f64(scale)).round())
-    var frac = str(n % scale)
+    var frac = (n % scale).to_string()
 
     while int(frac.len) < places
         frac = "0" + frac
 
-    (if negative then "-" else "") + str(n / scale) + "." + frac
+    (if negative then "-" else "") + (n / scale).to_string() + "." + frac
 end fixed
 
 // One argument, rendered as its spec asks.
@@ -257,8 +257,8 @@ private w_format(vm: &Vm) -> Result[unit, Fault]
     val wanted = placeholders(text(t))?
 
     if depth(vm) < wanted
-        return bad("'FORMAT' has " + str(wanted) + " places to fill and the stack holds "
-                   + str(depth(vm)))
+        return bad("'FORMAT' has " + wanted.to_string() + " places to fill and the stack holds "
+                   + depth(vm).to_string())
 
     // **The arguments are taken deepest-first**, so `1 2 "{} and {}"` reads as it was written. They
     // are copied out before any is popped, because a template may name fewer than the stack holds and

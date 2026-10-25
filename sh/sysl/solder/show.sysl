@@ -15,19 +15,19 @@ show(c: Cell, base: int) -> string
         Bool(b) -> if b then "TRUE" else "FALSE"
         Int(v) -> radix(long(v), base)
         Long(v) -> radix(v, base)
-        Real(v) -> str(v)
+        Real(v) -> v.to_string()
         Text(s) -> s
         Arr(items) -> "[" + joined(items, base) + "]"
         Obj(entries) -> "{" + fields(entries, base) + "}"
         Code(_) -> "<definition>"
         Native(_) -> "<native>"
-        Var(slot) -> "<variable " + str(slot) + ">"
-        Branch(delta) -> "<branch " + str(delta) + ">"
-        BranchIfFalse(delta) -> "<branch-if-false " + str(delta) + ">"
+        Var(slot) -> "<variable " + slot.to_string() + ">"
+        Branch(delta) -> "<branch " + delta.to_string() + ">"
+        BranchIfFalse(delta) -> "<branch-if-false " + delta.to_string() + ">"
         Rgb(r, g, b) -> "#" + two_hex(r) + two_hex(g) + two_hex(b)
-        Stamp(seconds, tz) -> str(seconds) + "@" + str(tz)
-        Coord(lon, lat) -> str(lon) + "," + str(lat)
-        Complex(re, im) -> str(re) + (if im < 0.0f32 then "" else "+") + str(im) + "i"
+        Stamp(seconds, tz) -> seconds.to_string() + "@" + tz.to_string()
+        Coord(lon, lat) -> lon.to_string() + "," + lat.to_string()
+        Complex(re, im) -> re.to_string() + (if im < 0.0f32 then "" else "+") + im.to_string() + "i"
 end show
 
 // An array's elements, space separated. A nested array keeps its brackets, since inside one they are
@@ -62,7 +62,7 @@ end fields
 // base is the one thing a Forth is expected to be able to move: `HEX`, `BINARY` and `OCTAL` are words
 // in the vocabulary and `BASE` is a variable a program may set to anything from two to thirty-six.
 radix(v: long, base: int) -> string
-    if base < 2 || base > 36 then return str(v)
+    if base < 2 || base > 36 then return v.to_string()
     if v == 0 then return "0"
 
     val digits = "0123456789abcdefghijklmnopqrstuvwxyz".bytes

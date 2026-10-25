@@ -18,7 +18,7 @@ private byte_of(name: string, part: string, c: Cell) -> Result[u8, Fault]
     c match
         Int(v) ->
             if v < 0 || v > 255
-                bad("'" + name + "' wants " + part + " from 0 to 255 -- it got " + str(v))
+                bad("'" + name + "' wants " + part + " from 0 to 255 -- it got " + v.to_string())
             else
                 Ok(u8(v))
         _ -> bad("'" + name + "' wants " + part + " as a number -- it got " + kind(c))
@@ -71,8 +71,8 @@ private w_datetime(vm: &Vm) -> Result[unit, Fault]
     val s = whole_of("DATETIME", "the seconds", seconds)?
     val z = whole_of("DATETIME", "the offset", tz)?
 
-    if s < 0 || s > 4294967295 then return bad("'DATETIME' wants seconds since 1970 -- it got " + str(s))
-    if z < -1440 || z > 1440 then return bad("'DATETIME' wants minutes from UTC -- it got " + str(z))
+    if s < 0 || s > 4294967295 then return bad("'DATETIME' wants seconds since 1970 -- it got " + s.to_string())
+    if z < -1440 || z > 1440 then return bad("'DATETIME' wants minutes from UTC -- it got " + z.to_string())
 
     push(vm, Stamp(u32(s), i16(z)))
 
