@@ -151,7 +151,7 @@ end pop
 peek(vm: &Vm, word: string) -> Result[Cell, Fault]
     if vm.data.is_empty() then return bad("'" + word + "' wants a value and the stack is empty")
 
-    Ok(vm.data.at(vm.data.len() - 1))
+    Ok(vm.data[vm.data.len() - 1])
 end peek
 
 // The two top cells, deeper one first, which is the order every binary word wants them in.
@@ -174,7 +174,7 @@ stack_view(vm: &Vm) -> string
     var out = "<" + depth(vm).to_string() + ">"
 
     for i in 0..<depth(vm)
-        out = out + " " + show(vm.data.at(i), vm.base)
+        out = out + " " + show(vm.data[i], vm.base)
 
     out
 end stack_view
@@ -190,7 +190,7 @@ find(vm: &Vm, name: string) -> Option[usize]
     while i > 0
         i -= 1
 
-        if vm.words.at(i).name == name then return Some(i)
+        if vm.words[i].name == name then return Some(i)
 
     None
 end find

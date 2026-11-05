@@ -149,7 +149,7 @@ underneath itself.
 
 ```
 dependencies {
-  solder { git = "github.com/sysl-lang/solder", version = "0.4.0" }
+  solder { git = "github.com/sysl-lang/solder", version = "0.4.3" }
 }
 ```
 

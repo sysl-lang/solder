@@ -242,7 +242,7 @@ format(template: string, args: &Buf[Cell], base: int) -> Result[string, Fault]
                 None -> return bad("'FORMAT' cannot read the layout '"
                                    + from_utf8_unchecked(b[i + 1..<j]) + "'")
 
-            out = out + rendered(args.at(next), spec, base)
+            out = out + rendered(args[next], spec, base)
             next += 1
             i = j + 1
 
@@ -266,7 +266,7 @@ private w_format(vm: &Vm) -> Result[unit, Fault]
     var args: Buf[Cell] = buf()
 
     for k in 0..<wanted
-        args.push(vm.data.at(depth(vm) - wanted + k))
+        args.push(vm.data[depth(vm) - wanted + k])
 
     val out = format(text(t), args, vm.base)?
 

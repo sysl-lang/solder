@@ -37,9 +37,9 @@ end hole
 private patch(vm: &Vm, at: usize)
     val delta = int(long(here(vm)) - long(at) - 1)
 
-    vm.building.at(at) match
-        Branch(_) -> vm.building.set(at, Branch(delta))
-        BranchIfFalse(_) -> vm.building.set(at, BranchIfFalse(delta))
+    vm.building[at] match
+        Branch(_) -> vm.building[at] = Branch(delta)
+        BranchIfFalse(_) -> vm.building[at] = BranchIfFalse(delta)
         _ -> ()
 
 // A branch backwards to `target`, written where the cursor is now.
@@ -211,11 +211,11 @@ private step(vm: &Vm, by: long) -> Result[bool, Fault]
     if vm.loops.is_empty() then return bad("'LOOP' outside a 'DO'")
 
     val top = vm.loops.len() - 1
-    val c = vm.loops.at(top)
+    val c = vm.loops[top]
     val next = c.index + by
     val done = if by >= 0 then next >= c.limit else next < c.limit
 
-    if done then vm.loops.truncate(top) else vm.loops.set(top, Count(next, c.limit))
+    if done then vm.loops.truncate(top) else vm.loops[top] = Count(next, c.limit)
 
     Ok(done)
 end step
@@ -260,7 +260,7 @@ private nth_counter(vm: &Vm, name: string, back: usize) -> Result[unit, Fault]
     if vm.loops.len() <= back
         return bad("'" + name + "' wants " + (back + 1).to_string() + " counted loops around it")
 
-    push(vm, Long(vm.loops.at(vm.loops.len() - 1 - back).index))
+    push(vm, Long(vm.loops[vm.loops.len() - 1 - back].index))
 
     Ok(())
 end nth_counter

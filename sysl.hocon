@@ -19,10 +19,10 @@
 
 package {
   name    = "solder"
-  version = "0.4.2"
+  version = "0.4.3"
 
   // 0.6.0 is the floor: the `.to_string()` spelling and the `sysl.hocon` manifest name need it.
-  sysl    = "0.6.0"
+  sysl    = "0.9.0"
 }
 
 // **`heap = true`, and it is a decision rather than an oversight.** The dictionary grows as words are

@@ -74,7 +74,7 @@ private word(vm: &Vm, name: string) -> Result[bool, Fault]
 
     find(vm, name) match
         Some(i) ->
-            val w = vm.words.at(i)
+            val w = vm.words[i]
 
             // **An immediate word runs even while compiling**, which is how a definition gets its
             // shape: `IF` has to plant a branch at the moment it is read, not when the definition is
@@ -150,16 +150,16 @@ private inner(vm: &Vm) -> Result[unit, Fault]
 
     while vm.frames.len() > floor
         val top = vm.frames.len() - 1
-        val f = vm.frames.at(top)
+        val f = vm.frames[top]
 
         if f.ip >= f.body.len()
             vm.frames.truncate(top)
 
             continue
 
-        val c = f.body.at(f.ip)
+        val c = f.body[f.ip]
 
-        vm.frames.set(top, Frame(f.body, f.ip + 1))
+        vm.frames[top] = Frame(f.body, f.ip + 1)
 
         c match
             Branch(delta) -> jump(vm, top, delta)
@@ -176,9 +176,9 @@ end inner
 
 // Move a frame's cursor by a signed distance from the cell after the branch.
 private jump(vm: &Vm, at: usize, delta: int)
-    val f = vm.frames.at(at)
+    val f = vm.frames[at]
 
-    vm.frames.set(at, Frame(f.body, usize(long(f.ip) + long(delta))))
+    vm.frames[at] = Frame(f.body, usize(long(f.ip) + long(delta)))
 
 // The next token, for a word that parses ahead. `Eof` is a refusal here rather than a value, because
 // every one of them was written expecting something after it.

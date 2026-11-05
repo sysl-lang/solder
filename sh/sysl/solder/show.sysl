@@ -38,7 +38,7 @@ private joined(items: &Buf[Cell], base: int) -> string
     for i in 0..<items.len()
         if i > 0 then out = out + " "
 
-        out = out + show(items.at(i), base)
+        out = out + show(items[i], base)
 
     out
 end joined
@@ -49,7 +49,7 @@ private fields(entries: &Buf[Entry], base: int) -> string
     for i in 0..<entries.len()
         if i > 0 then out = out + " "
 
-        val e = entries.at(i)
+        val e = entries[i]
 
         out = out + e.key + ": " + show(e.value, base)
 
@@ -85,7 +85,7 @@ radix(v: long, base: int) -> string
     while i > 0
         i -= 1
 
-        flipped.push(out.at(i))
+        flipped.push(out[i])
 
     from_utf8_unchecked(flipped.view())
 end radix

@@ -229,7 +229,7 @@ private items_same(xs: &Buf[Cell], ys: &Buf[Cell]) -> bool
     if xs.len() != ys.len() then return false
 
     for i in 0..<xs.len()
-        if !same(xs.at(i), ys.at(i)) then return false
+        if !same(xs[i], ys[i]) then return false
 
     true
 end items_same
@@ -243,11 +243,11 @@ private entries_same(xs: &Buf[Entry], ys: &Buf[Entry]) -> bool
     if xs.len() != ys.len() then return false
 
     for i in 0..<xs.len()
-        val e = xs.at(i)
+        val e = xs[i]
         var found = false
 
         for j in 0..<ys.len()
-            val f = ys.at(j)
+            val f = ys[j]
 
             if f.key == e.key
                 if !same(e.value, f.value) then return false

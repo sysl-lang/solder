@@ -106,7 +106,7 @@ end index
 private w_pick(vm: &Vm) -> Result[unit, Fault]
     val n = index(vm, "PICK")?
 
-    push(vm, vm.data.at(depth(vm) - 1 - n))
+    push(vm, vm.data[depth(vm) - 1 - n])
 
     Ok(())
 end w_pick
@@ -167,7 +167,7 @@ private w_words(vm: &Vm) -> Result[unit, Fault]
     for i in 0..<vm.words.len()
         if i > 0 then emit(vm, " ")
 
-        emit(vm, vm.words.at(i).name)
+        emit(vm, vm.words[i].name)
 
     Ok(())
 end w_words
@@ -177,7 +177,7 @@ private w_help(vm: &Vm) -> Result[unit, Fault]
 
     find(vm, name) match
         Some(i) ->
-            val w = vm.words.at(i)
+            val w = vm.words[i]
 
             emit(vm, w.name + "  " + w.help)
 
@@ -229,7 +229,7 @@ private w_tick(vm: &Vm) -> Result[unit, Fault]
 
     find(vm, name) match
         Some(i) ->
-            push(vm, vm.words.at(i).def)
+            push(vm, vm.words[i].def)
 
             Ok(())
         None -> bad("'" + name + "' is not a word")
@@ -244,7 +244,7 @@ private w_bracket_tick(vm: &Vm) -> Result[unit, Fault]
 
     find(vm, name) match
         Some(i) ->
-            vm.building.push(vm.words.at(i).def)
+            vm.building.push(vm.words[i].def)
 
             Ok(())
         None -> bad("'" + name + "' is not a word")
@@ -288,7 +288,7 @@ private w_fetch(vm: &Vm) -> Result[unit, Fault]
     val a = pop(vm, "@")?
     val slot = slot_of(vm, "@", a)?
 
-    push(vm, vm.vars.at(slot))
+    push(vm, vm.vars[slot])
 
     Ok(())
 end w_fetch
@@ -297,7 +297,7 @@ private w_store(vm: &Vm) -> Result[unit, Fault]
     val (value, target) = pop2(vm, "!")?
     val slot = slot_of(vm, "!", target)?
 
-    vm.vars.set(slot, value)
+    vm.vars[slot] = value
 
     Ok(())
 end w_store
@@ -306,7 +306,7 @@ private w_add_store(vm: &Vm) -> Result[unit, Fault]
     val (amount, target) = pop2(vm, "+!")?
     val slot = slot_of(vm, "+!", target)?
 
-    vm.vars.set(slot, add_cells("+!", vm.vars.at(slot), amount)?)
+    vm.vars[slot] = add_cells("+!", vm.vars[slot], amount)?
 
     Ok(())
 end w_add_store
@@ -315,7 +315,7 @@ private w_incr_store(vm: &Vm) -> Result[unit, Fault]
     val target = pop(vm, "1+!")?
     val slot = slot_of(vm, "1+!", target)?
 
-    vm.vars.set(slot, add_cells("1+!", vm.vars.at(slot), Int(1))?)
+    vm.vars[slot] = add_cells("1+!", vm.vars[slot], Int(1))?
 
     Ok(())
 end w_incr_store
@@ -324,7 +324,7 @@ private w_decr_store(vm: &Vm) -> Result[unit, Fault]
     val target = pop(vm, "1-!")?
     val slot = slot_of(vm, "1-!", target)?
 
-    vm.vars.set(slot, add_cells("1-!", vm.vars.at(slot), Int(-1))?)
+    vm.vars[slot] = add_cells("1-!", vm.vars[slot], Int(-1))?
 
     Ok(())
 end w_decr_store
