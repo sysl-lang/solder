@@ -244,7 +244,7 @@ end w_do
 // **`LOOP` plants the step and then a branch back that is taken when the step says it is not
 // finished**, which is why the runtime word pushes a boolean rather than jumping: a branch is a
 // distance in a body and only the compiling word knows it.
-private close_loop(vm: &Vm, name: string, stepper: &Fn(&Vm) -> Result[unit, Fault]) -> Result[unit, Fault]
+private close_loop(vm: &Vm, name: string, stepper: &Fn(@keeps &Vm) -> Result[unit, Fault]) -> Result[unit, Fault]
     val m = take_mark(vm, name, DoMark)?
 
     vm.building.push(Native(stepper))

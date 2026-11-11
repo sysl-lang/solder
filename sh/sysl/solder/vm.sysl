@@ -200,12 +200,12 @@ define(vm: &Vm, name: string, def: Cell, immediate: bool, help: string)
     vm.words.push(Word(name, def, immediate, help))
 
 // File a word written in sysl.
-native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
+native(vm: &Vm, name: string, f: &Fn(@keeps &Vm) -> Result[unit, Fault], help: string)
     define(vm, name, Native(f), false, help)
 
 // File a word written in sysl that runs even while the reader is compiling. `IF`, `DEF` and `END` are
 // what this is for: they are how a definition gets its shape, so they cannot wait until it is run.
-immediate_native(vm: &Vm, name: string, f: &Fn(&Vm) -> Result[unit, Fault], help: string)
+immediate_native(vm: &Vm, name: string, f: &Fn(@keeps &Vm) -> Result[unit, Fault], help: string)
     define(vm, name, Native(f), true, help)
 
 // Everything printed since the last time this was asked, and nothing afterwards.
