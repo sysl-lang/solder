@@ -19,7 +19,7 @@
 
 package {
   name    = "solder"
-  version = "0.4.3"
+  version = "0.4.4"
 
   // 0.6.0 is the floor: the `.to_string()` spelling and the `sysl.hocon` manifest name need it.
   sysl    = "0.9.0"
